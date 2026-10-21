@@ -52,7 +52,7 @@ const server=http.createServer(async(req,res)=>{
  if(req.method==='POST'){
    if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Запрос разрешён только с адреса приложения.'});
  }
- if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'0.6.1'});
+ if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'0.6.2'});
  if(pathname==='/api/login'&&req.method==='POST'){
    if(!useLoginLimit(req))return json(res,429,{error:'Слишком много попыток. Подождите 15 минут.'});
    const data=await body(req,2048);if(typeof data.password!=='string'||data.password.length>256)return json(res,400,{error:'Введите пароль владельца.'});
