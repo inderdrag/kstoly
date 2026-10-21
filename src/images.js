@@ -15,8 +15,14 @@ export function createImageService({db,key,model=process.env.ANYMODEL_IMAGE_MODE
  db.exec('CREATE TABLE IF NOT EXISTS image_jobs(id TEXT PRIMARY KEY, client TEXT UNIQUE NOT NULL, created INTEGER NOT NULL, upstream TEXT, state TEXT NOT NULL); CREATE TABLE IF NOT EXISTS image_usage(day TEXT PRIMARY KEY, attempts INTEGER NOT NULL DEFAULT 0)');
  let cached=null,creating=false;const immediate=new Map(),polls=new Map();
  async function call(endpoint,init={},max=10*1024*1024){
+  const stage=endpoint.startsWith('/models/')?'Проверка тарифа':init.method==='POST'?'Создание фото':'Получение фото';
   let r;try{r=await fetcher(BASE+endpoint,{...init,headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json',...init.headers},signal:AbortSignal.timeout(30000),redirect:'error'});}catch{throw err('Не удалось связаться с генератором. Повторная генерация автоматически не запускается.',504);}
-  if(!r.ok){await r.body?.cancel();throw err(`Генератор AnyModel HTTP ${r.status}. Попробуйте позже.`,r.status===429?429:502);}
+  if(!r.ok){
+   await r.body?.cancel();
+   const reason=r.status===503?'Сервис генерации сейчас недоступен или не дождался поставщика.':r.status===402?'Недостаточно баланса или квоты у поставщика.':r.status===429?'Поставщик ограничил частоту запросов.':'Поставщик отклонил запрос.';
+   const e=err(`${stage} · ${model} · AnyModel HTTP ${r.status}. ${reason} Автоматического повторного создания нет.`,r.status===429?429:502);
+   e.upstreamRejected=true;throw e;
+  }
   const reader=r.body.getReader(),chunks=[];let size=0;for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>max){await reader.cancel();throw err('Ответ генератора слишком большой.');}chunks.push(value);}
   let data;try{data=JSON.parse(Buffer.concat(chunks).toString());}catch{throw err('Непонятный ответ генератора.');}return {status:r.status,data};
  }
@@ -50,7 +56,7 @@ export function createImageService({db,key,model=process.env.ANYMODEL_IMAGE_MODE
     const {status,data:out}=await call('/images/generations',{method:'POST',body:JSON.stringify({model,prompt,n:1,size:'1024x1024',response_format:'b64_json',background:true})});
     if(status===202){if(typeof out.id!=='string'||!/^[a-zA-Z0-9_-]{1,120}$/.test(out.id))throw err('Генератор не вернул номер задания.');db.prepare("UPDATE image_jobs SET upstream=?,state='pending' WHERE id=?").run(out.id,id);return {id,status:'pending'};}
     const value=result(out);immediate.set(id,{value,until:now()+600000});db.prepare("UPDATE image_jobs SET state='done' WHERE id=?").run(id);return {id,...value};
-   }catch(e){db.prepare("UPDATE image_jobs SET state='failed' WHERE id=?").run(id);throw e;}
+   }catch(e){db.prepare("UPDATE image_jobs SET state='failed' WHERE id=?").run(id);if(e.upstreamRejected)e.imageJobFailed=true;throw e;}
   }finally{creating=false;}
  }
  async function poll(id){

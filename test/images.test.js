@@ -10,3 +10,15 @@ test('images: async jobs, idempotent creation, server quota, poll binding',async
 test('images: generation prompt contains dish only, one image, no photo or secret',async()=>{const h=harness({sync:true});const out=await h.service.start(request('a'));assert.equal(out.status,'done');const body=JSON.parse(h.calls.find(x=>x[1].method==='POST')[1].body);assert.equal(body.n,1);assert.equal(body.background,true);assert.equal(body.response_format,'b64_json');assert.equal(body.size,'1024x1024');assert.ok(!body.prompt.includes('fake-test-key'));assert.ok(!body.prompt.includes(jpeg));assert.ok(body.prompt.includes('Рис'));assert.equal((await h.service.poll(out.id)).image,out.image);h.db.close();});
 test('images: arbitrary provider image URLs never fetched',async()=>{const h=harness({bad:true});const out=await h.service.start(request('a'));await assert.rejects(()=>h.service.poll(out.id),/изображение/);assert.ok(h.calls.every(x=>x[0].startsWith('https://anymodel.org/v1/')));h.db.close();});
 test('images: job expiry never creates a replacement generation',async()=>{const h=harness();const out=await h.service.start(request('a'));h.advance(86400001);await assert.rejects(()=>h.service.poll(out.id),/истекло/);assert.equal(h.calls.filter(x=>x[1].method==='POST').length,1);h.db.close();});
+test('images: 503 diagnostics identify creation stage and release definite failed job',async()=>{
+ const db=new DatabaseSync(':memory:');const fetcher=async(url,init)=>url.includes('/models/info')?Response.json({id:'am/flux.2-klein-4b',kind:'image',billing:{unit:'image',coefficient:{input:0,output:0}}}):new Response('DO_NOT_EXPOSE_PROVIDER_BODY',{status:503});
+ const service=createImageService({db,key:'fake-test-key',fetcher});
+ await assert.rejects(()=>service.start(request('creation503')),e=>e.imageJobFailed===true&&e.message.includes('Создание фото')&&e.message.includes('am/flux.2-klein-4b')&&e.message.includes('HTTP 503')&&!e.message.includes('DO_NOT_EXPOSE'));
+ assert.equal((await service.start(request('creation503'))).status,'failed');db.close();
+});
+test('images: retrieval 503 preserves job for retrying GET without another generation',async()=>{
+ const db=new DatabaseSync(':memory:');let posts=0;const fetcher=async(url,init)=>{if(url.includes('/models/info'))return Response.json({id:'am/flux.2-klein-4b',kind:'image',billing:{unit:'image',coefficient:{input:0,output:0}}});if(init.method==='POST'){posts++;return Response.json({id:'provider-existing'},{status:202});}return new Response('DO_NOT_EXPOSE_PROVIDER_BODY',{status:503});};
+ const service=createImageService({db,key:'fake-test-key',fetcher});const job=await service.start(request('poll503'));
+ await assert.rejects(()=>service.poll(job.id),e=>e.imageJobFailed!==true&&e.message.includes('Получение фото')&&e.message.includes('HTTP 503'));
+ assert.equal((await service.start(request('poll503'))).id,job.id);assert.equal(posts,1);db.close();
+});

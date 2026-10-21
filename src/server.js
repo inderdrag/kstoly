@@ -52,7 +52,7 @@ const server=http.createServer(async(req,res)=>{
  if(req.method==='POST'){
    if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Запрос разрешён только с адреса приложения.'});
  }
- if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'0.6.0'});
+ if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'0.6.1'});
  if(pathname==='/api/login'&&req.method==='POST'){
    if(!useLoginLimit(req))return json(res,429,{error:'Слишком много попыток. Подождите 15 минут.'});
    const data=await body(req,2048);if(typeof data.password!=='string'||data.password.length>256)return json(res,400,{error:'Введите пароль владельца.'});
@@ -106,5 +106,5 @@ const server=http.createServer(async(req,res)=>{
  const name=files.get(pathname);if(!name)return json(res,404,{error:'Страница не найдена.'});
  const mime=name.endsWith('.js')?'text/javascript; charset=utf-8':name.endsWith('.png')?'image/png':name.endsWith('.jpg')?'image/jpeg':name.endsWith('.webmanifest')?'application/manifest+json':'text/html; charset=utf-8';
  const file=await readFile(path.join(ROOT,name));res.writeHead(200,{...headers,'Content-Type':mime,'Cache-Control':'no-cache'});res.end(req.method==='HEAD'?undefined:file);
- }catch(e){if(!res.headersSent)json(res,e.status|| (e instanceof RecipeError?400:500),{error:e.status||e instanceof RecipeError?e.message:'Внутренняя ошибка. Попробуйте позже.'});else res.end();}
+ }catch(e){if(!res.headersSent)json(res,e.status|| (e instanceof RecipeError?400:500),{error:e.status||e instanceof RecipeError?e.message:'Внутренняя ошибка. Попробуйте позже.',...(e.imageJobFailed===true?{imageJobFailed:true}:{})});else res.end();}
 });server.requestTimeout=20000;server.headersTimeout=15000;server.keepAliveTimeout=5000;server.listen(PORT,'0.0.0.0',()=>console.log(`К столу запущено. Порт ${PORT}. Ключ ${API_KEY?'задан':'не задан'}. Секреты и фотографии в журнал не записываются.`));
