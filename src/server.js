@@ -41,7 +41,7 @@ async function upstream(messages){
  const reader=response.body.getReader();let len=0;const chunks=[];while(true){const{done,value}=await reader.read();if(done)break;len+=value.byteLength;if(len>256000){await reader.cancel();throw Object.assign(new Error('Слишком большой ответ AnyModel.'),{status:502});}chunks.push(value);}
  let data;try{data=JSON.parse(Buffer.concat(chunks).toString());}catch{throw Object.assign(new Error('AnyModel вернул непонятный ответ.'),{status:502});}
  const raw=data.choices?.[0]?.message?.content;
- return {raw:typeof raw==='string'?raw:Array.isArray(raw)?raw.filter(x=>x.type==='text').map(x=>x.text).join(''):null};
+ return {raw:typeof raw==='string'?raw:Array.isArray(raw)?raw.filter(x=>x.type==='text').map(x=>x.text).join(''):null,finish:data.choices?.[0]?.finish_reason};
 }
 const files=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/sw.js','sw.js'],['/manifest.webmanifest','manifest.webmanifest'],['/icon-192.png','icon-192.png'],['/icon-512.png','icon-512.png']]);
 const server=http.createServer(async(req,res)=>{
@@ -50,7 +50,7 @@ const server=http.createServer(async(req,res)=>{
  if(req.method==='POST'){
    if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Запрос разрешён только с адреса приложения.'});
  }
- if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'0.4.0'});
+ if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'0.4.1'});
  if(pathname==='/api/login'&&req.method==='POST'){
    if(!useLoginLimit(req))return json(res,429,{error:'Слишком много попыток. Подождите 15 минут.'});
    const data=await body(req,2048);if(typeof data.password!=='string'||data.password.length>256)return json(res,400,{error:'Введите пароль владельца.'});
@@ -73,7 +73,15 @@ const server=http.createServer(async(req,res)=>{
      const messages=[{role:'system',content:SYSTEM_PROMPT},{role:'user',content}];const options={receipt:Boolean(data.receipt),currency:data.currency};let recipe;
      for(let attempt=0;attempt<2;attempt++){
        const result=await upstream(messages);
-       try{recipe=parseRecipeSelection(result.raw,options);break;}catch(e){if(!(e instanceof RecipeError))throw e;if(attempt===1)return json(res,502,{error:'Нейросеть дважды вернула неправильную структуру. Фото не сохранено. Попробуйте позже.'});messages.push({role:'user',content:'Предыдущий ответ не прошёл проверку JSON. Повтори ответ по заданной схеме, используя исходные фото. При status ok нужен массив recipes с разными полными рецептами. Верни только JSON. price:null допустимо; единицы базы цены должны совпадать с ингредиентом.'});}
+       try{
+         if(['length','max_tokens'].includes(result.finish))throw new RecipeError('Ответ обрезан по лимиту длины.');
+         if(result.finish==='content_filter')return json(res,502,{error:'Поставщик модели остановил ответ фильтром безопасности. Повторный запрос не отправлен.'});
+         recipe=parseRecipeSelection(result.raw,options);break;
+       }catch(e){
+         if(!(e instanceof RecipeError))throw e;
+         if(attempt===1)return json(res,502,{error:'Не удалось проверить рецепты после двух попыток. Причина: '+e.message+' Повторно фото пока не отправляйте.'});
+         messages.push({role:'user',content:'Исправь формат ответа. Проверка нашла: '+e.message+' По исходным фото верни ТОЛЬКО JSON-объект status ok и массив recipes из ТРЁХ разных полных рецептов (или меньше, если продуктов мало). Пиши компактно. У каждого рецепта status ok и warnings:[] при отсутствии предупреждений. Числа не строками. price:null допустимо. Не смешивай единицы базы цены с единицами ингредиента. Если фото небезопасно или не о продуктах, верни соответствующий статус и message.'});
+       }
      }
      const recipes=recipe.status==='ok'?recipe.recipes:[];
      return json(res,200,{status:recipe.status,recipe:recipes[0]||recipe,recipes,currency:data.currency,region:data.region,model:MODEL,cost:recipes.length?calculateCost(recipes[0]):null});

@@ -3,28 +3,44 @@ const obj=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 const text=(x,n=600)=>typeof x==='string'&&x.trim().length>0&&x.length<=n;
 const number=(x,min,max)=>typeof x==='number'&&Number.isFinite(x)&&x>=min&&x<=max;
 export function validateRecipe(data,{receipt=false,currency='RUB'}={}) {
-  const fail=()=>{throw new RecipeError('Ответ модели не соответствует структуре рецепта.');};
-  if(!obj(data)||!['ok','bad_photo','not_food','need_details'].includes(data.status))fail();
+  const fail=field=>{throw new RecipeError('Неверное поле: '+field+'.');};
+  if(!obj(data))fail('recipe');
+  if(!['ok','bad_photo','not_food','need_details'].includes(data.status))fail('status');
   if(data.status!=='ok'){
-    if(!text(data.message,600))fail();
+    if(!text(data.message,600))fail('message');
     return {status:data.status,message:data.message};
   }
-  if(!text(data.title,150)||!text(data.description,800)||!Number.isInteger(data.servings)||!number(data.servings,1,8)||!number(data.prep_minutes,0,240)||!number(data.cook_minutes,1,720))fail();
-  if(!Array.isArray(data.ingredients)||data.ingredients.length<1||data.ingredients.length>30||!Array.isArray(data.steps)||data.steps.length<1||data.steps.length>15)fail();
-  const ingredients=data.ingredients.map(i=>{
-    if(!obj(i)||!text(i.name,100)||!number(i.amount,.001,100000)||!['g','ml','piece'].includes(i.unit))fail();
+  for(const [key,max] of [['title',150],['description',800]])if(!text(data[key],max))fail(key);
+  if(!Number.isInteger(data.servings)||!number(data.servings,1,8))fail('servings');
+  if(!number(data.prep_minutes,0,240))fail('prep_minutes');
+  if(!number(data.cook_minutes,0,720))fail('cook_minutes');
+  if(!Array.isArray(data.ingredients)||data.ingredients.length<1||data.ingredients.length>30)fail('ingredients');
+  if(!Array.isArray(data.steps)||data.steps.length<1||data.steps.length>15)fail('steps');
+  const ingredients=data.ingredients.map((i,index)=>{
+    const key='ingredients['+index+']';
+    if(!obj(i))fail(key);
+    if(!text(i.name,100))fail(key+'.name');
+    if(!number(i.amount,.001,100000))fail(key+'.amount');
+    if(!['g','ml','piece'].includes(i.unit))fail(key+'.unit');
     let price=null;
-    if(i.price!==null){
-      const p=i.price;
-      if(!obj(p)||!['estimate','receipt'].includes(p.source)||!number(p.quantity,.001,100000)||p.unit!==i.unit||p.currency!==currency||!number(p.low,0,1000000)||!number(p.high,0,1000000)||p.low>p.high||!text(p.note,400))fail();
-      if(p.source==='receipt'&&(!receipt||p.low!==p.high))fail();
+    if(i.price!==null&&i.price!==undefined){
+      const priceKey=key+'.price',p=i.price;
+      if(!obj(p))fail(priceKey);
+      if(!['estimate','receipt'].includes(p.source))fail(priceKey+'.source');
+      if(!number(p.quantity,.001,100000))fail(priceKey+'.quantity');
+      if(p.unit!==i.unit)fail(priceKey+'.unit');
+      if(p.currency!==currency)fail(priceKey+'.currency');
+      if(!number(p.low,0,1000000)||!number(p.high,0,1000000)||p.low>p.high)fail(priceKey+'.low/high');
+      if(!text(p.note,400))fail(priceKey+'.note');
+      if(p.source==='receipt'&&(!receipt||p.low!==p.high))fail(priceKey+'.receipt');
       price={source:p.source,quantity:p.quantity,unit:p.unit,currency:p.currency,low:p.low,high:p.high,note:p.note};
     }
     return {name:i.name,amount:i.amount,unit:i.unit,price};
   });
-  const steps=data.steps.map(s=>{if(!obj(s)||!text(s.title,100)||!text(s.body,1200))fail();return {title:s.title,body:s.body};});
-  if(!Array.isArray(data.warnings)||data.warnings.length>12||data.warnings.some(x=>!text(x,400)))fail();
-  return {status:'ok',title:data.title,description:data.description,servings:data.servings,prep_minutes:data.prep_minutes,cook_minutes:data.cook_minutes,ingredients,steps,warnings:data.warnings};
+  const steps=data.steps.map((step,index)=>{if(!obj(step)||!text(step.title,100)||!text(step.body,1200))fail('steps['+index+']');return {title:step.title,body:step.body};});
+  const warnings=data.warnings===undefined?[]:data.warnings;
+  if(!Array.isArray(warnings)||warnings.length>12||warnings.some(x=>!text(x,400)))fail('warnings');
+  return {status:'ok',title:data.title,description:data.description,servings:data.servings,prep_minutes:data.prep_minutes,cook_minutes:data.cook_minutes,ingredients,steps,warnings};
 }
 export function parseRecipe(raw,options){
   if(typeof raw!=='string'||raw.length>60000)throw new RecipeError('Пустой или слишком большой ответ модели.');
@@ -68,7 +84,7 @@ export function parseRecipeSelection(raw,options){
   let value;try{value=JSON.parse(source)}catch{throw new RecipeError('Модель вернула невалидный JSON.')}
   if(value?.status!=='ok')return validateRecipe(value,options);
   if(!Array.isArray(value.recipes)||value.recipes.length<1||value.recipes.length>5)throw new RecipeError('Ожидаются от 1 до 5 рецептов на выбор.');
-  const recipes=value.recipes.map(r=>{const recipe=validateRecipe(r,options);if(recipe.status!=='ok')throw new RecipeError('В списке должен быть полный рецепт.');return recipe});
+  const recipes=value.recipes.map((r,index)=>{try{const recipe=validateRecipe(obj(r)&&r.status===undefined?{...r,status:'ok'}:r,options);if(recipe.status!=='ok')throw new RecipeError('В списке должен быть полный рецепт.');return recipe}catch(e){if(e instanceof RecipeError)throw new RecipeError('recipes['+index+']: '+e.message);throw e}});
   if(new Set(recipes.map(r=>r.title.trim().toLocaleLowerCase('ru'))).size!==recipes.length)throw new RecipeError('Названия вариантов должны различаться.');
   return {status:'ok',recipes};
 }
