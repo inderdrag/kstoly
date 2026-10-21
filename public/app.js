@@ -94,6 +94,21 @@ function saveImageSnapshot(snapshot,n){
  if(history.some(x=>x.portions===n&&x.currency===snapshot.currency&&JSON.stringify(x.recipe)===JSON.stringify(snapshot.recipe)))return true;
  const old=history.slice();history.unshift({...structuredClone(snapshot),id:crypto.randomUUID(),date:new Date().toISOString(),portions:n});history=history.slice(0,50);if(persist()){renderHistory();if(current)updateSaveButton();return true}history=old;return false;
 }
+// The user sees the result before it can replace a saved photo.
+function approveGeneratedPhoto(recipe,image){
+ return new Promise(resolve=>{
+  const dialog=document.createElement('dialog');dialog.style.cssText='max-width:460px;width:calc(100% - 32px);max-height:90vh;overflow:auto;border:1px solid #d7dacb;border-radius:20px;padding:20px;background:var(--bg,#f8f7f0);color:inherit';
+  const title=document.createElement('h2');title.textContent='Подходит ли фото к блюду?';
+  const dish=document.createElement('p');dish.textContent=recipe.title;
+  const photo=document.createElement('img');photo.src=image;photo.alt='Предпросмотр изображения ИИ: '+recipe.title;photo.style.cssText='width:100%;max-height:45vh;object-fit:contain;border-radius:12px';
+  const note=document.createElement('p');note.textContent='Проверьте основные ингредиенты и вид блюда. Генератор может ошибаться. Пока фото не сохранено. Отказ не вернёт потраченную попытку и не запустит новую.';
+  const yes=document.createElement('button');yes.textContent='Подходит — сохранить';yes.className='wide primary';
+  const no=document.createElement('button');no.textContent='Не подходит — не сохранять';no.className='wide';
+  let finished=false;const finish=value=>{if(finished)return;finished=true;dialog.close();dialog.remove();resolve(value)};
+  yes.onclick=()=>finish(true);no.onclick=()=>finish(false);dialog.oncancel=e=>{e.preventDefault();finish(false)};
+  dialog.append(title,dish,photo,note,yes,no);document.body.append(dialog);dialog.showModal();
+ });
+}
 $('generatePhoto').onclick=async()=>{
  if(imageBusy||!current||!$('allowGeneration').checked)return;if(!authenticated)return notify('Для генерации войдите с паролем владельца.');
  const snapshot=structuredClone(current),n=portions,k=DishImages.key(snapshot.recipe);let saved;
@@ -117,6 +132,8 @@ $('generatePhoto').onclick=async()=>{
    await new Promise(r=>setTimeout(r,5000));result=await api('/api/images/'+encodeURIComponent(result.id));
   }
   if(result.status!=='done')throw Error('Не удалось получить фото.');
+  const approved=await approveGeneratedPhoto(snapshot.recipe,result.image);
+  if(!approved){localStorage.removeItem('k-stolu-pending-image');imageMessage(k,'Изображение отклонено и не сохранено. Прежнее фото, если было, оставлено.');notify('Фото не сохранено. Новая генерация не запускалась.');return}
   await DishImages.save(snapshot.recipe,result.image,result.model);
   localStorage.removeItem('k-stolu-pending-image');
   const savedRecipe=saveImageSnapshot(snapshot,n);

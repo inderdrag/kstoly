@@ -40,7 +40,8 @@ export function validateRecipe(data,{receipt=false,currency='RUB'}={}) {
   const steps=data.steps.map((step,index)=>{if(!obj(step)||!text(step.title,100)||!text(step.body,1200))fail('steps['+index+']');return {title:step.title,body:step.body};});
   const warnings=data.warnings===undefined?[]:data.warnings;
   if(!Array.isArray(warnings)||warnings.length>12||warnings.some(x=>!text(x,400)))fail('warnings');
-  return {status:'ok',title:data.title,description:data.description,servings:data.servings,prep_minutes:data.prep_minutes,cook_minutes:data.cook_minutes,ingredients,steps,warnings};
+  if(data.image_prompt!==undefined&&(!text(data.image_prompt,1000)||data.image_prompt.trim().length<40||!/[A-Za-z]/.test(data.image_prompt)||/[А-Яа-яЁё<>]/.test(data.image_prompt)))fail('image_prompt');
+  return {status:'ok',...(data.image_prompt?{image_prompt:data.image_prompt.trim()}:{}),title:data.title,description:data.description,servings:data.servings,prep_minutes:data.prep_minutes,cook_minutes:data.cook_minutes,ingredients,steps,warnings};
 }
 export function parseRecipe(raw,options){
   if(typeof raw!=='string'||raw.length>60000)throw new RecipeError('Пустой или слишком большой ответ модели.');

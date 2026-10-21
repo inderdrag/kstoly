@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {readFileSync} from 'node:fs';import {createImageService,decodeImage} from '../src/images.js';
 const jpeg=readFileSync(new URL('./fixture.jpg',import.meta.url)).toString('base64');
-const recipe={status:'ok',title:'Рис с овощами',description:'Домашнее блюдо',servings:2,prep_minutes:5,cook_minutes:15,ingredients:[{name:'Рис',amount:100,unit:'g',price:null}],steps:[{title:'Приготовьте',body:'Сварите рис.'}],warnings:[]};
+const recipe={status:'ok',title:'Рис с овощами',description:'Домашнее блюдо',image_prompt:'Cooked rice with vegetables, loose white rice grains mixed with small pieces of vegetables, served as a simple savory main dish.',servings:2,prep_minutes:5,cook_minutes:15,ingredients:[{name:'Рис',amount:100,unit:'g',price:null}],steps:[{title:'Приготовьте',body:'Сварите рис.'}],warnings:[]};
 const request=id=>({requestId:id.padEnd(20,'x'),recipe,currency:'RUB',consent:true});
 function harness({paid=false,sync=false,bad=false}={}){const db=new DatabaseSync(':memory:');let calls=[],clock=1000000000;const fetcher=async(url,init)=>{calls.push([url,init]);if(url.includes('/models/info'))return Response.json({id:'am/flux.2-klein-4b',kind:'image',billing:{unit:'image',coefficient:{input:paid?1:0,output:paid?1:0}}});if(init.method==='POST')return sync?Response.json({data:[{b64_json:jpeg}]}):Response.json({id:'provider-job-1'},{status:202});return Response.json({data:[bad?{url:'http://127.0.0.1/secret'}:{b64_json:jpeg}]});};return {db,calls,service:createImageService({db,key:'fake-test-key',model:'am/flux.2-klein-4b',fetcher,now:()=>clock,daily:2}),advance:n=>clock+=n};}
 test('images: accepts only bounded PNG/JPEG base64; no remote URL',()=>{assert.match(decodeImage(jpeg),/^data:image\/jpeg/);for(const x of [null,'http://localhost/','PGh0bWw+eDwv aHRtbD4=','A'.repeat(9*1024*1024)])assert.throws(()=>decodeImage(x));});
@@ -38,7 +38,7 @@ test('cloudflare: incomplete credentials or unconfirmed Free plan never calls up
 test('cloudflare: one synchronous call, correct authentication, no source photos or fallback',async()=>{
  const h=cloudHarness();const options=await h.service.options();assert.equal(options.provider,'Cloudflare');assert.equal(options.available,true);
  const result=await h.service.start(request('cf-success'));assert.equal(result.status,'done');assert.match(result.image,/^data:image\/jpeg/);
- assert.equal(h.calls.length,1);const[url,init]=h.calls[0];assert.equal(url,'https://api.cloudflare.com/client/v4/accounts/'+'a'.repeat(32)+'/ai/run/@cf/black-forest-labs/flux-1-schnell');assert.equal(init.headers.Authorization,'Bearer private-test-token');const body=JSON.parse(init.body);assert.equal(body.steps,4);assert.ok(body.prompt.length<=2048);assert.ok(body.prompt.includes('Рис'));assert.ok(!init.body.includes(jpeg));assert.ok(!init.body.includes('private-test-token'));
+ assert.equal(h.calls.length,1);const[url,init]=h.calls[0];assert.equal(url,'https://api.cloudflare.com/client/v4/accounts/'+'a'.repeat(32)+'/ai/run/@cf/black-forest-labs/flux-1-schnell');assert.equal(init.headers.Authorization,'Bearer private-test-token');const body=JSON.parse(init.body);assert.equal(body.steps,4);assert.ok(body.prompt.length<=2048);assert.ok(body.prompt.startsWith('Cooked rice with vegetables'));assert.ok(!/[А-Яа-я]/.test(body.prompt));assert.ok(!init.body.includes(jpeg));assert.ok(!init.body.includes('private-test-token'));
  assert.equal((await h.service.start(request('cf-success'))).id,result.id);assert.equal((await h.service.poll(result.id)).image,result.image);assert.equal(h.calls.length,1);h.db.close();
 });
 test('cloudflare: quota and provider failure never retry or fall back to AnyModel',async()=>{
@@ -46,4 +46,13 @@ test('cloudflare: quota and provider failure never retry or fall back to AnyMode
 });
 test('cloudflare: returned external URLs are rejected without fetching',async()=>{
  const h=cloudHarness({invalid:true});await assert.rejects(()=>h.service.start(request('cf-invalid')));assert.equal(h.calls.length,1);h.db.close();
+});
+
+test('cloudflare: legacy recipes cannot generate generic photos or consume quota',async()=>{
+ const h=cloudHarness();const old=request('cf-legacy');delete old.recipe.image_prompt;
+ try{await assert.rejects(()=>h.service.start(old),/новый подбор/);assert.equal(h.calls.length,0);assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM image_usage').get().n,0);}finally{old.recipe.image_prompt='Cooked rice with vegetables, loose white rice grains mixed with small pieces of vegetables, served as a simple savory main dish.';h.db.close();}
+});
+test('cloudflare: sandwich identity leads the prompt, not photographic decor or JSON',async()=>{
+ const h=cloudHarness();const dish={...recipe,title:'Бутерброды с творожным сыром и авокадо',image_prompt:'Open-faced sandwiches: visible slices of bread spread with white cream cheese and topped with green avocado slices. The bread, white cheese layer and avocado topping are clearly visible.'};
+ const out=await h.service.start({...request('cf-sandwich'),recipe:dish});assert.equal(out.status,'done');const prompt=JSON.parse(h.calls[0][1].body).prompt;assert.ok(prompt.startsWith('Open-faced sandwiches:'));for(const term of ['bread','white cream cheese','green avocado slices'])assert.ok(prompt.includes(term));assert.ok(!prompt.includes('ingredients":'));assert.ok(prompt.length<=2048);h.db.close();
 });
