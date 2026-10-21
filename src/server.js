@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {createImageService} from './images.js';
 import {readFile,mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -14,6 +15,7 @@ const origin=process.env.PUBLIC_ORIGIN||process.env.RENDER_EXTERNAL_URL||(PRODUC
 if(PASSWORD.length<16||SECRET.length<32||!origin||PRODUCTION&&!origin.startsWith('https://')){console.error('Задайте APP_PASSWORD (16+), SESSION_SECRET (32+) и PUBLIC_ORIGIN (HTTPS в production).');process.exit(1);}
 const passwordHash=scryptSync(PASSWORD,'oliva-owner-password-v1',32);const DAILY=Math.max(1,Math.min(100,Number(process.env.DAILY_REQUEST_LIMIT)||20));const UPSTREAM=Math.max(1,Math.min(200,Number(process.env.DAILY_UPSTREAM_LIMIT)||30));
 const dir=path.resolve(process.env.DATA_DIR||'./var');await mkdir(dir,{recursive:true});const db=new DatabaseSync(path.join(dir,'quota.db'));db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS usage(day TEXT PRIMARY KEY, requests INTEGER NOT NULL DEFAULT 0, upstream INTEGER NOT NULL DEFAULT 0)');
+const imageService=createImageService({db,key:API_KEY});
 let inFlight=false;const loginAttempts=new Map();
 const headers={
  'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY',
@@ -43,14 +45,14 @@ async function upstream(messages){
  const raw=data.choices?.[0]?.message?.content;
  return {raw:typeof raw==='string'?raw:Array.isArray(raw)?raw.filter(x=>x.type==='text').map(x=>x.text).join(''):null,finish:data.choices?.[0]?.finish_reason};
 }
-const files=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/photos.js','photos.js'],['/photos/pesto-pasta.jpg','photos/pesto-pasta.jpg'],['/photos/vegetable-salad.jpg','photos/vegetable-salad.jpg'],['/sw.js','sw.js'],['/manifest.webmanifest','manifest.webmanifest'],['/icon-192.png','icon-192.png'],['/icon-512.png','icon-512.png']]);
+const files=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/photos.js','photos.js'],['/generated.js','generated.js'],['/photos/pesto-pasta.jpg','photos/pesto-pasta.jpg'],['/photos/vegetable-salad.jpg','photos/vegetable-salad.jpg'],['/sw.js','sw.js'],['/manifest.webmanifest','manifest.webmanifest'],['/icon-192.png','icon-192.png'],['/icon-512.png','icon-512.png']]);
 const server=http.createServer(async(req,res)=>{
  try{
  const url=new URL(req.url,origin);const pathname=url.pathname;
  if(req.method==='POST'){
    if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Запрос разрешён только с адреса приложения.'});
  }
- if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'0.5.0'});
+ if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'0.6.0'});
  if(pathname==='/api/login'&&req.method==='POST'){
    if(!useLoginLimit(req))return json(res,429,{error:'Слишком много попыток. Подождите 15 минут.'});
    const data=await body(req,2048);if(typeof data.password!=='string'||data.password.length>256)return json(res,400,{error:'Введите пароль владельца.'});
@@ -59,6 +61,18 @@ const server=http.createServer(async(req,res)=>{
    return json(res,200,{ok:true},{'Set-Cookie':cookie(value+'.'+sign(value),7*86400)});
  }
  if(pathname==='/api/logout'&&req.method==='POST')return json(res,200,{ok:true},{'Set-Cookie':cookie('',0)});
+ if(pathname==='/api/image-options'&&req.method==='GET'){
+   if(!authenticated(req))return json(res,401,{error:'Войдите с паролем владельца.'});
+   return json(res,200,await imageService.options());
+ }
+ if(pathname==='/api/images'&&req.method==='POST'){
+   if(!authenticated(req))return json(res,401,{error:'Войдите с паролем владельца.'});
+   const result=await imageService.start(await body(req,64000));return json(res,result.status==='pending'?202:200,result);
+ }
+ if(pathname.startsWith('/api/images/')&&req.method==='GET'){
+   if(!authenticated(req))return json(res,401,{error:'Войдите с паролем владельца.'});
+   const result=await imageService.poll(pathname.slice('/api/images/'.length));return json(res,result.status==='pending'?202:200,result);
+ }
  if(pathname==='/api/analyze'&&req.method==='POST'){
    if(!authenticated(req))return json(res,401,{error:'Войдите с паролем владельца.'});
    if(!API_KEY)return json(res,503,{error:'Ключ AnyModel ещё не задан на сервере. Доступен только учебный пример.'});
@@ -93,4 +107,4 @@ const server=http.createServer(async(req,res)=>{
  const mime=name.endsWith('.js')?'text/javascript; charset=utf-8':name.endsWith('.png')?'image/png':name.endsWith('.jpg')?'image/jpeg':name.endsWith('.webmanifest')?'application/manifest+json':'text/html; charset=utf-8';
  const file=await readFile(path.join(ROOT,name));res.writeHead(200,{...headers,'Content-Type':mime,'Cache-Control':'no-cache'});res.end(req.method==='HEAD'?undefined:file);
  }catch(e){if(!res.headersSent)json(res,e.status|| (e instanceof RecipeError?400:500),{error:e.status||e instanceof RecipeError?e.message:'Внутренняя ошибка. Попробуйте позже.'});else res.end();}
-});server.requestTimeout=20000;server.headersTimeout=15000;server.keepAliveTimeout=5000;server.listen(PORT,'0.0.0.0',()=>console.log(`Олива запущена. Порт ${PORT}. Ключ ${API_KEY?'задан':'не задан'}. Секреты и фотографии в журнал не записываются.`));
+});server.requestTimeout=20000;server.headersTimeout=15000;server.keepAliveTimeout=5000;server.listen(PORT,'0.0.0.0',()=>console.log(`К столу запущено. Порт ${PORT}. Ключ ${API_KEY?'задан':'не задан'}. Секреты и фотографии в журнал не записываются.`));

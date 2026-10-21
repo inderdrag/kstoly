@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512">
+<title>К столу — лист и тарелка</title>
+<rect width="512" height="512" fill="#ECE9DF"/>
+<circle cx="256" cy="256" r="161" fill="#3E4D36"/>
+<circle cx="256" cy="256" r="131" fill="none" stroke="#AFBC94" stroke-width="3"/>
+<path d="M240 295c-41-76-20-129 61-160 21 81 0 136-61 160Z" fill="#F5F1E6"/>
+<path d="M260 320c12-65 51-91 117-80-20 62-59 88-117 80Z" fill="#B9C79C"/>
+<path d="M221 342c24-63 48-115 74-161" fill="none" stroke="#3E4D36" stroke-width="9" stroke-linecap="round"/>
+<circle cx="176" cy="252" r="13" fill="#CA7759"/>
+</svg>
