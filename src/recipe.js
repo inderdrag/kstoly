@@ -61,3 +61,14 @@ export function jpegInfo(dataUrl){
   }
   throw new RecipeError('Не удалось прочитать размеры JPEG.');
 }
+
+export function parseRecipeSelection(raw,options){
+  if(typeof raw!=='string'||raw.length>180000)throw new RecipeError('Пустой или слишком большой ответ модели.');
+  let source=raw.trim();if(source.startsWith('```'))source=source.replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'');
+  let value;try{value=JSON.parse(source)}catch{throw new RecipeError('Модель вернула невалидный JSON.')}
+  if(value?.status!=='ok')return validateRecipe(value,options);
+  if(!Array.isArray(value.recipes)||value.recipes.length<1||value.recipes.length>5)throw new RecipeError('Ожидаются от 1 до 5 рецептов на выбор.');
+  const recipes=value.recipes.map(r=>{const recipe=validateRecipe(r,options);if(recipe.status!=='ok')throw new RecipeError('В списке должен быть полный рецепт.');return recipe});
+  if(new Set(recipes.map(r=>r.title.trim().toLocaleLowerCase('ru'))).size!==recipes.length)throw new RecipeError('Названия вариантов должны различаться.');
+  return {status:'ok',recipes};
+}
