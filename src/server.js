@@ -37,7 +37,7 @@ async function upstream(messages){
  if(!reserve('upstream',UPSTREAM))throw Object.assign(new Error('Дневной лимит обращений к нейросети исчерпан.'),{status:429});
  const payload={model:MODEL,messages,max_tokens:5000,stream:false};if(process.env.ANYMODEL_JSON_MODE==='json_object')payload.response_format={type:'json_object'};
  let response;try{response=await fetch('https://anymodel.org/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(payload),signal:AbortSignal.timeout(55000)});}catch(e){throw Object.assign(new Error(e.name==='TimeoutError'?'Нейросеть не ответила за 55 секунд. Попробуйте позже.':'Не удалось связаться с AnyModel.'),{status:504});}
- if(!response.ok){await response.body?.cancel();const map={401:'Ключ AnyModel не принят. Проверьте секрет на сервере.',402:'Недостаточно средств или токенов в AnyModel.',403:'Маршрут или модель недоступны этому ключу.',429:'AnyModel ограничил частоту запросов. Попробуйте позже.',400:'AnyModel отклонил формат запроса или модель. Поддержку фото этого маршрута нужно проверить.'};throw Object.assign(new Error(map[response.status]||'AnyModel временно недоступен.'),{status:response.status===429?429:502});}
+ if(!response.ok){await response.body?.cancel();const map={401:'Ключ AnyModel не принят. Проверьте секрет на сервере.',402:'Недостаточно средств или токенов в AnyModel.',403:'Маршрут или модель недоступны этому ключу.',429:'AnyModel ограничил частоту запросов. Попробуйте позже.',400:'AnyModel отклонил формат запроса или модель. Поддержку фото этого маршрута нужно проверить.'};throw Object.assign(new Error(`AnyModel HTTP ${response.status}: ${map[response.status]||({404:'Маршрут модели или API не найден.',500:'Внутренняя ошибка на стороне шлюза или поставщика.',502:'Шлюз получил ошибку от поставщика модели.',503:'Выбранный маршрут временно недоступен.',504:'Шлюз не дождался ответа поставщика.'}[response.status])||'Неожиданный ответ шлюза.'}`),{status:response.status===429?429:502});}
  const reader=response.body.getReader();let len=0;const chunks=[];while(true){const{done,value}=await reader.read();if(done)break;len+=value.byteLength;if(len>256000){await reader.cancel();throw Object.assign(new Error('Слишком большой ответ AnyModel.'),{status:502});}chunks.push(value);}
  let data;try{data=JSON.parse(Buffer.concat(chunks).toString());}catch{throw Object.assign(new Error('AnyModel вернул непонятный ответ.'),{status:502});}
  const raw=data.choices?.[0]?.message?.content;
@@ -50,7 +50,7 @@ const server=http.createServer(async(req,res)=>{
  if(req.method==='POST'){
    if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Запрос разрешён только с адреса приложения.'});
  }
- if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY});
+ if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'0.3.1'});
  if(pathname==='/api/login'&&req.method==='POST'){
    if(!useLoginLimit(req))return json(res,429,{error:'Слишком много попыток. Подождите 15 минут.'});
    const data=await body(req,2048);if(typeof data.password!=='string'||data.password.length>256)return json(res,400,{error:'Введите пароль владельца.'});
