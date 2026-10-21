@@ -84,7 +84,7 @@ function updateGenerationButtons(){
 }
 async function checkImageOptions(){
  if(!$('allowGeneration').checked){$('generationInfo').textContent='Выключено. Сохранённые фото остаются доступны.';return}
- $('generationInfo').textContent='Проверяем бесплатный маршрут…';
+ $('generationInfo').textContent='Проверяем настройки генератора…';
  try{const info=await api('/api/image-options');$('generationInfo').textContent=info.message+(info.available?' До '+info.dailyLimit+' генераций в день.':'')}catch(e){$('generationInfo').textContent=e.message}
 }
 $('allowGeneration').onchange=()=>{try{localStorage.setItem('k-stolu-generation',$('allowGeneration').checked?'on':'off')}catch{notify('Настройка не сохранится после закрытия.')}updateGenerationButtons();checkImageOptions()};
@@ -100,7 +100,7 @@ $('generatePhoto').onclick=async()=>{
  try{saved=JSON.parse(localStorage.getItem('k-stolu-pending-image')||'null')}catch{}
  if(saved&&saved.key!==k&&!confirm('Для другого блюда есть незавершённое задание. Продолжить с этим блюдом? Старое изображение пока можно будет получить по прежнему заданию только до его замены на устройстве.'))return;
  const resume=saved?.key===k?saved:null;
- if(!resume&&!confirm('Создать одно фото блюда? Название, состав и способ приготовления отправятся в AnyModel. Проверим бесплатный тариф; платный маршрут не запустится.'))return;
+ if(!resume&&!confirm('Создать одно фото блюда? Название, состав и способ приготовления отправятся настроенному поставщику изображений (Cloudflare или AnyModel). Условия и квота указаны в настройках генерации.'))return;
  imageBusy=true;$('recipeMore').open=false;imageMessage(k,resume?'Получаем результат прежнего задания…':'Проверяем тариф и создаём фото…');updateGenerationButtons();
  const pending=resume||{key:k,requestId:crypto.randomUUID()};
  try{

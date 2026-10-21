@@ -27,3 +27,23 @@ test('images: explicitly selected alternative free model is accepted without def
  const fetcher=async(url)=>{seen=url;return Response.json({id:model,kind:'image',billing:{unit:'image',coefficient:{input:0,output:0}}});};
  const service=createImageService({db,key:'fake-test-key',model,fetcher});const options=await service.options();assert.equal(options.available,true);assert.equal(options.model,model);assert.ok(seen.endsWith(encodeURIComponent(model)));db.close();
 });
+function cloudHarness({free=true,account='a'.repeat(32),token='private-test-token',status=200,invalid=false}={}){
+ const db=new DatabaseSync(':memory:');const calls=[];
+ const service=createImageService({db,key:'unused-anymodel',cloudflareAccount:account,cloudflareToken:token,cloudflareFreePlan:free,fetcher:async(url,init)=>{calls.push([url,init]);return status===200?Response.json({success:true,result:{image:invalid?'https://evil.example/image':jpeg}}):new Response('PRIVATE_ERROR',{status});}});
+ return {db,calls,service};
+}
+test('cloudflare: incomplete credentials or unconfirmed Free plan never calls upstream',async()=>{
+ for(const config of [{free:false},{token:''},{account:'../invalid'}]){const h=cloudHarness(config);assert.equal((await h.service.options()).available,false);await assert.rejects(()=>h.service.start(request('blocked')));assert.equal(h.calls.length,0);h.db.close();}
+});
+test('cloudflare: one synchronous call, correct authentication, no source photos or fallback',async()=>{
+ const h=cloudHarness();const options=await h.service.options();assert.equal(options.provider,'Cloudflare');assert.equal(options.available,true);
+ const result=await h.service.start(request('cf-success'));assert.equal(result.status,'done');assert.match(result.image,/^data:image\/jpeg/);
+ assert.equal(h.calls.length,1);const[url,init]=h.calls[0];assert.equal(url,'https://api.cloudflare.com/client/v4/accounts/'+'a'.repeat(32)+'/ai/run/@cf/black-forest-labs/flux-1-schnell');assert.equal(init.headers.Authorization,'Bearer private-test-token');const body=JSON.parse(init.body);assert.equal(body.steps,4);assert.ok(body.prompt.length<=2048);assert.ok(body.prompt.includes('Рис'));assert.ok(!init.body.includes(jpeg));assert.ok(!init.body.includes('private-test-token'));
+ assert.equal((await h.service.start(request('cf-success'))).id,result.id);assert.equal((await h.service.poll(result.id)).image,result.image);assert.equal(h.calls.length,1);h.db.close();
+});
+test('cloudflare: quota and provider failure never retry or fall back to AnyModel',async()=>{
+ for(const status of [429,503,401]){const h=cloudHarness({status});await assert.rejects(()=>h.service.start(request('cf-fail')),e=>e.message.includes('Cloudflare HTTP '+status)&&!e.message.includes('PRIVATE_ERROR'));assert.equal((await h.service.start(request('cf-fail'))).status,'failed');assert.equal(h.calls.length,1);h.db.close();}
+});
+test('cloudflare: returned external URLs are rejected without fetching',async()=>{
+ const h=cloudHarness({invalid:true});await assert.rejects(()=>h.service.start(request('cf-invalid')));assert.equal(h.calls.length,1);h.db.close();
+});

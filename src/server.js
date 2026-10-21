@@ -15,7 +15,7 @@ const origin=process.env.PUBLIC_ORIGIN||process.env.RENDER_EXTERNAL_URL||(PRODUC
 if(PASSWORD.length<16||SECRET.length<32||!origin||PRODUCTION&&!origin.startsWith('https://')){console.error('Задайте APP_PASSWORD (16+), SESSION_SECRET (32+) и PUBLIC_ORIGIN (HTTPS в production).');process.exit(1);}
 const passwordHash=scryptSync(PASSWORD,'oliva-owner-password-v1',32);const DAILY=Math.max(1,Math.min(100,Number(process.env.DAILY_REQUEST_LIMIT)||20));const UPSTREAM=Math.max(1,Math.min(200,Number(process.env.DAILY_UPSTREAM_LIMIT)||30));
 const dir=path.resolve(process.env.DATA_DIR||'./var');await mkdir(dir,{recursive:true});const db=new DatabaseSync(path.join(dir,'quota.db'));db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS usage(day TEXT PRIMARY KEY, requests INTEGER NOT NULL DEFAULT 0, upstream INTEGER NOT NULL DEFAULT 0)');
-const imageService=createImageService({db,key:API_KEY});
+const imageService=createImageService({db,key:API_KEY,cloudflareAccount:process.env.CLOUDFLARE_ACCOUNT_ID||'',cloudflareToken:process.env.CLOUDFLARE_API_TOKEN||'',cloudflareFreePlan:process.env.CLOUDFLARE_FREE_PLAN_CONFIRMED==='true'});
 let inFlight=false;const loginAttempts=new Map();
 const headers={
  'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY',
