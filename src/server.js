@@ -43,14 +43,14 @@ async function upstream(messages){
  const raw=data.choices?.[0]?.message?.content;
  return {raw:typeof raw==='string'?raw:Array.isArray(raw)?raw.filter(x=>x.type==='text').map(x=>x.text).join(''):null,finish:data.choices?.[0]?.finish_reason};
 }
-const files=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/sw.js','sw.js'],['/manifest.webmanifest','manifest.webmanifest'],['/icon-192.png','icon-192.png'],['/icon-512.png','icon-512.png']]);
+const files=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/photos.js','photos.js'],['/photos/pesto-pasta.jpg','photos/pesto-pasta.jpg'],['/photos/vegetable-salad.jpg','photos/vegetable-salad.jpg'],['/sw.js','sw.js'],['/manifest.webmanifest','manifest.webmanifest'],['/icon-192.png','icon-192.png'],['/icon-512.png','icon-512.png']]);
 const server=http.createServer(async(req,res)=>{
  try{
  const url=new URL(req.url,origin);const pathname=url.pathname;
  if(req.method==='POST'){
    if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Запрос разрешён только с адреса приложения.'});
  }
- if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'0.4.1'});
+ if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'0.5.0'});
  if(pathname==='/api/login'&&req.method==='POST'){
    if(!useLoginLimit(req))return json(res,429,{error:'Слишком много попыток. Подождите 15 минут.'});
    const data=await body(req,2048);if(typeof data.password!=='string'||data.password.length>256)return json(res,400,{error:'Введите пароль владельца.'});
@@ -90,7 +90,7 @@ const server=http.createServer(async(req,res)=>{
  if(pathname.startsWith('/api/'))return json(res,404,{error:'Такого метода API нет.'});
  if(!['GET','HEAD'].includes(req.method))return json(res,405,{error:'Метод не поддерживается.'});
  const name=files.get(pathname);if(!name)return json(res,404,{error:'Страница не найдена.'});
- const mime=name.endsWith('.js')?'text/javascript; charset=utf-8':name.endsWith('.png')?'image/png':name.endsWith('.webmanifest')?'application/manifest+json':'text/html; charset=utf-8';
+ const mime=name.endsWith('.js')?'text/javascript; charset=utf-8':name.endsWith('.png')?'image/png':name.endsWith('.jpg')?'image/jpeg':name.endsWith('.webmanifest')?'application/manifest+json':'text/html; charset=utf-8';
  const file=await readFile(path.join(ROOT,name));res.writeHead(200,{...headers,'Content-Type':mime,'Cache-Control':'no-cache'});res.end(req.method==='HEAD'?undefined:file);
  }catch(e){if(!res.headersSent)json(res,e.status|| (e instanceof RecipeError?400:500),{error:e.status||e instanceof RecipeError?e.message:'Внутренняя ошибка. Попробуйте позже.'});else res.end();}
 });server.requestTimeout=20000;server.headersTimeout=15000;server.keepAliveTimeout=5000;server.listen(PORT,'0.0.0.0',()=>console.log(`Олива запущена. Порт ${PORT}. Ключ ${API_KEY?'задан':'не задан'}. Секреты и фотографии в журнал не записываются.`));

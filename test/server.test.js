@@ -12,7 +12,7 @@ test('HTTP: пароль, cookie, CSRF, фото, повторный JSON, ли�
  response=await send('/api/analyze',{...valid,region:'RetryCity'},cookie);assert.equal(response.status,200);assert.equal((await response.json()).recipe.status,'ok');
  for(const code of [404,503]){const r=await send('/api/analyze',{...valid,region:`Provider${code}City`},cookie);assert.equal(r.status,502);const text=await r.text();assert.ok(text.includes(`AnyModel HTTP ${code}`));assert.ok(!text.includes('DO_NOT_EXPOSE_PROVIDER_BODY'));}
  const bad=await send('/api/analyze',{...valid,region:'BadCity'},cookie);assert.equal(bad.status,502);assert.match((await bad.json()).error,/Причина: Модель вернула невалидный JSON/);assert.equal((await send('/api/analyze',valid,cookie)).status,429);
- for(const file of ['/','/app.js','/manifest.webmanifest','/icon-192.png']){const r=await fetch(origin+file);assert.equal(r.status,200);assert.ok(!(await r.text()).includes('fake-test-key-never-valid'));}assert.equal((await fetch(origin+'/.env')).status,404);assert.equal((await fetch(origin+'/src/server.js')).status,404);
+ for(const file of ['/','/app.js','/photos.js','/photos/pesto-pasta.jpg','/photos/vegetable-salad.jpg','/manifest.webmanifest','/icon-192.png']){const r=await fetch(origin+file);assert.equal(r.status,200);assert.ok(!(await r.text()).includes('fake-test-key-never-valid'));}assert.equal((await fetch(origin+'/.env')).status,404);assert.equal((await fetch(origin+'/src/server.js')).status,404);
  assert.equal((await send('/api/logout',{},cookie)).status,200);assert.ok(!log.includes(password));assert.ok(!log.includes('fake-test-key-never-valid'));assert.ok(!log.includes(image));
  }finally{child.kill();await new Promise(r=>child.once('exit',r));await rm(dir,{recursive:true,force:true})}
 });

@@ -1,0 +1,7 @@
+import test from 'node:test';import assert from 'node:assert/strict';import '../public/photos.js';
+const select=globalThis.OlivaPhotos.select;
+const recipe=(title,names)=>({title,ingredients:names.map(name=>({name}))});
+test('Фото: паста с зеленью и томатами получает локальную иллюстрацию',()=>{assert.equal(select(recipe('Паста с томатами и шпинатом',['Паста','Томаты','Шпинат'])).id,'pasta')});
+test('Фото: салат получает подходящую фотографию, не фото продуктов',()=>{assert.equal(select(recipe('Овощной салат',['Томаты','Огурцы','Листья салата'])).id,'salad')});
+test('Фото: мясо, рыба, майонез и неподходящие блюда не подменяются',()=>{for(const r of [recipe('Оливье',['Картофель','Майонез']),recipe('Рис с овощами',['Рис','Томаты']),recipe('Паста с курицей',['Паста','Курица','Томат','Базилик']),recipe('Тёплый салат',['Томаты']),recipe('Салат с тунцом',['Тунец','Помидор'])])assert.equal(select(r),null)});
+test('Фото: URL из модели игнорируется, все источники фиксированы',()=>{const r=recipe('Паста с томатами и шпинатом',['Паста','Томат','Шпинат']);r.image='https://evil.example/track';assert.ok(select(r).src.startsWith('/photos/'));assert.equal(select({title:'Неизвестно',image:'https://evil.example/track'}),null);for(const p of Object.values(globalThis.OlivaPhotos.library)){assert.ok(p.source.startsWith('https://unsplash.com/photos/'));assert.ok(p.licenseUrl.startsWith('https://'));assert.ok(p.author)}});
