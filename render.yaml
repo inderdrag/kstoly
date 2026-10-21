@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: oliva-photo-helper
+    runtime: node
+    plan: free
+    numInstances: 1
+    buildCommand: node --version && npm test
+    startCommand: npm start
+    healthCheckPath: /api/status
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ANYMODEL_API_KEY
+        sync: false
+      - key: ANYMODEL_MODEL
+        value: ag/gemini-2.5-flash
+      - key: APP_PASSWORD
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DAILY_REQUEST_LIMIT
+        value: "20"
+      - key: DAILY_UPSTREAM_LIMIT
+        value: "30"
+      - key: DATA_DIR
+        value: ./var
+      - key: ANYMODEL_JSON_MODE
+        value: "off"

@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+node_modules/
+var/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Generated from scripts/assets.json by npm pretest/prestart
+/public/icon-192.png
+/public/icon-512.png
+/test/fixture.jpg

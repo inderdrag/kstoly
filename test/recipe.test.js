@@ -1,0 +1,11 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {validateRecipe,parseRecipe,calculateCost,jpegInfo} from '../src/recipe.js';
+const make=()=>({status:'ok',title:'Рис',description:'Простой рецепт',servings:2,prep_minutes:5,cook_minutes:20,ingredients:[{name:'Рис',amount:150,unit:'g',price:{source:'estimate',quantity:900,unit:'g',currency:'RUB',low:120,high:180,note:'Пример'}}],steps:[{title:'Сварите',body:'Варите по инструкции на упаковке.'}],warnings:[]});
+test('Стоимость использованной части и диапазон',()=>{const r=validateRecipe(make());assert.deepEqual([calculateCost(r).low,calculateCost(r).high],[20,30]);assert.equal(calculateCost(r,4).low,40);assert.equal(calculateCost(r).perPortionLow,10)});
+test('Неизвестные цены не выдаются за нулевые',()=>{const r=make();r.ingredients[0].price=null;const c=calculateCost(validateRecipe(r));assert.equal(c.hasPrices,false);assert.deepEqual(c.missing,['Рис'])});
+test('Источник чек без фото чека запрещён',()=>{const r=make();r.ingredients[0].price.source='receipt';r.ingredients[0].price.high=120;assert.throws(()=>validateRecipe(r));assert.equal(validateRecipe(r,{receipt:true}).ingredients[0].price.source,'receipt')});
+test('Несовпадение единиц запрещено',()=>{const r=make();r.ingredients[0].price.unit='ml';assert.throws(()=>validateRecipe(r))});
+test('Валюта должна совпадать с запросом',()=>assert.throws(()=>validateRecipe(make(),{currency:'KZT'})));
+test('Нулевые базы и отрицательные цены запрещены',()=>{for(const [key,v]of [['quantity',0],['low',-1]]){const r=make();r.ingredients[0].price[key]=v;assert.throws(()=>validateRecipe(r))}});
+test('Неправильный JSON отклоняется, обёртка кода распознаётся',()=>{assert.throws(()=>parseRecipe('not-json'));assert.equal(parseRecipe('```json\n'+JSON.stringify(make())+'\n```').title,'Рис')});
+test('Нерелевантное фото имеет отдельный статус',()=>assert.equal(validateRecipe({status:'not_food',message:'Это не продукты.'}).status,'not_food'));
+test('JPEG проверяется по содержимому и размерам',()=>{const image='data:image/jpeg;base64,'+readFileSync(new URL('./fixture.jpg',import.meta.url)).toString('base64');assert.equal(jpegInfo(image).width,80);assert.throws(()=>jpegInfo('https://example.com/photo.jpg'));assert.throws(()=>jpegInfo('data:image/jpeg;base64,AAABBB=='))});
