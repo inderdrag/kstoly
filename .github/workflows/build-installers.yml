@@ -53,8 +53,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: ${{ runner.temp }}/k-stolu-build/source/desktop/package-lock.json
       - name: Prepare approved app icon
         run: node ../scripts/prepare-installer-assets.mjs
         working-directory: ${{ runner.temp }}/k-stolu-build/source/desktop
