@@ -1,0 +1,146 @@
+name: Build installers — К столу
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Что собрать'
+        type: choice
+        options: [both, windows, android]
+        default: both
+      android_release:
+        description: 'Android: постоянный release-ключ из Secrets (иначе тестовая preview-сборка)'
+        type: boolean
+        default: false
+      publish_draft:
+        description: 'Также создать черновик GitHub Release с файлами'
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  windows:
+    if: inputs.target == 'both' || inputs.target == 'windows'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: node ../scripts/prepare-installer-assets.mjs
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Windows-x64-installer
+          path: desktop/dist/*Setup.exe
+          if-no-files-found: error
+          retention-days: 14
+  android:
+    if: inputs.target == 'both' || inputs.target == 'android'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Prepare approved app icon
+        run: node ../scripts/prepare-installer-assets.mjs
+      - name: Install SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Cache preview signing key (NOT a production key)
+        if: ${{ !inputs.android_release }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: k-stolu-preview-signing-v1
+      - name: Prepare release signing
+        if: inputs.android_release
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then echo "::error::Missing Android signing secret: $name"; exit 1; fi
+          done
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/k-stolu-release.jks"
+      - name: Build preview APK
+        if: ${{ !inputs.android_release }}
+        run: gradle --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+      - name: Build signed release APK
+        if: inputs.android_release
+        run: gradle --no-daemon :app:lintRelease :app:testReleaseUnitTest :app:assembleRelease
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/k-stolu-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - name: Collect APK and verify signature
+        env:
+          RELEASE_MODE: ${{ inputs.android_release }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          if [ "$RELEASE_MODE" = true ]; then
+            cp app/build/outputs/apk/release/app-release.apk out/K-Stolu-0.7.0-Android.apk
+          else
+            cp app/build/outputs/apk/debug/app-debug.apk out/K-Stolu-0.7.0-Android-PREVIEW.apk
+          fi
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose out/*.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Android-APK
+          path: android/out/*.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove temporary signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/k-stolu-release.jks"
+  release-draft:
+    if: ${{ always() && inputs.publish_draft && (needs.windows.result == 'success' || needs.windows.result == 'skipped') && (needs.android.result == 'success' || needs.android.result == 'skipped') }}
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Checksums and notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd installers && find . -maxdepth 1 -type f \( -name '*.exe' -o -name '*.apk' \) -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS.txt)
+          test -s installers/SHA256SUMS.txt
+          cp docs/INSTALLER-RELEASE-NOTES.md notes.md
+      - name: Create draft (not published automatically)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "installers-0.7.0-run-${GITHUB_RUN_NUMBER}" installers/* --draft --prerelease --target "$GITHUB_SHA" --title "К столу 0.7.0 — test installers" --notes-file notes.md

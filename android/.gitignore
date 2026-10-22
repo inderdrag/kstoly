@@ -1,0 +1,7 @@
+.gradle/
+**/build/
+local.properties
+*.jks
+*.keystore
+out/
+app/src/main/res/drawable/app_icon.png

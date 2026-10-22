@@ -1,0 +1,45 @@
+{
+  "name": "k-stolu-desktop",
+  "version": "0.7.0",
+  "private": true,
+  "description": "К столу — личный помощник по домашней готовке",
+  "author": "K Stolu",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "test": "node --test *.test.cjs"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "ru.kstolu.desktop",
+    "productName": "К столу",
+    "asar": true,
+    "files": [
+      "main.cjs",
+      "policy.cjs",
+      "package.json",
+      "icon.png"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "artifactName": "K-Stolu-${version}-Windows-x64-Setup.${ext}",
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "К столу",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}
