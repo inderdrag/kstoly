@@ -18,7 +18,7 @@ import static org.junit.Assert.*;
 public class MainActivityTest {
     private org.robolectric.android.controller.ActivityController<MainActivity> controller;
     private MainActivity activity;
-    @Before public void setup(){controller=Robolectric.buildActivity(MainActivity.class).setup();activity=controller.get();}
+    @Before public void setup()throws Exception{controller=Robolectric.buildActivity(MainActivity.class).setup();activity=controller.get();}
     @After public void close(){controller.pause().stop().destroy();}
     private TextView find(View root,String text){if(root instanceof TextView&&((TextView)root).getText().toString().equals(text))return (TextView)root;if(root instanceof ViewGroup){ViewGroup g=(ViewGroup)root;for(int i=0;i<g.getChildCount();i++){TextView found=find(g.getChildAt(i),text);if(found!=null)return found;}}return null;}
     private void click(String label){TextView view=find(activity.getWindow().getDecorView(),label);assertNotNull(label,view);view.performClick();}
@@ -27,10 +27,12 @@ public class MainActivityTest {
         Bitmap bitmap=Bitmap.createBitmap(390,844,Bitmap.Config.ARGB_8888);root.draw(new Canvas(bitmap));File dir=new File("build/visual-qa");dir.mkdirs();try(FileOutputStream out=new FileOutputStream(new File(dir,name+".png"))){assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,out));}bitmap.recycle();
     }
     @Test public void nativeHomeSettingsHistoryScreens()throws Exception{
+        Method home=MainActivity.class.getDeclaredMethod("home");home.setAccessible(true);home.invoke(activity);
         assertNotNull(find(activity.getWindow().getDecorView(),"К столу"));render("01-home");click("Настройки");assertNotNull(find(activity.getWindow().getDecorView(),"Сохранить настройки"));render("02-settings");click("История");render("03-empty-history");assertNotNull(find(activity.getWindow().getDecorView(),"Здесь появятся сохранённые рецепты."));
     }
-    @Test public void nativeLoginDialogDoesNotStorePassword()throws Exception{
-        click("Войти по паролю приложения");android.app.AlertDialog dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();assertNotNull(dialog);renderView(dialog.getWindow().getDecorView(),"05-login");dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).performClick();
+    @Test public void nativeLoginScreenDoesNotStorePassword()throws Exception{
+        assertNull(find(activity.getWindow().getDecorView(),"Подобрать блюда"));assertNotNull(find(activity.getWindow().getDecorView(),"Войти"));
+        assertNull(find(activity.getWindow().getDecorView(),"Подобрать блюда"));render("05-login");
     }
     @Test public void recipeKeepsUnknownPricesAndDoesNotGenerateAutomatically()throws Exception{
         String json="{\"recipe\":{\"status\":\"ok\",\"title\":\"Бутерброды с авокадо\",\"description\":\"Хлеб с творожным сыром и ломтиками авокадо.\",\"servings\":2,\"prep_minutes\":10,\"cook_minutes\":0,\"ingredients\":[{\"name\":\"Хлеб\",\"amount\":2,\"unit\":\"piece\",\"price\":null},{\"name\":\"Авокадо\",\"amount\":1,\"unit\":\"piece\",\"price\":null}],\"steps\":[{\"title\":\"Соберите\",\"body\":\"Намажьте хлеб сыром, сверху выложите ломтики авокадо.\"}],\"warnings\":[]},\"currency\":\"RUB\",\"id\":\"test\"}";

@@ -11,12 +11,30 @@ final class ApiClient {
         final int status; final boolean failedJob;
         ApiError(String message,int status,boolean failedJob){super(message);this.status=status;this.failedJob=failedJob;}
     }
-    static void resetSession(){CookieHandler.setDefault(new CookieManager(null,CookiePolicy.ACCEPT_ORIGINAL_SERVER));}
+    private static SessionCookies session;
+    interface StoreFactory { SessionStore create(android.content.Context context); }
+    private static StoreFactory stores=SessionStore::new;
+    interface Transport { HttpURLConnection open(URL url)throws Exception; }
+    private static Transport transport=url->(HttpURLConnection)url.openConnection();
+    static synchronized void initialize(android.content.Context context){
+        // HttpURLConnection's default CookieManager may emit RFC2965 quotes and
+        // $Version metadata. The server expects a simple browser-style cookie.
+        CookieHandler.setDefault(null);
+        session=new SessionCookies(stores.create(context.getApplicationContext()));
+    }
+    static synchronized boolean hasSession(){return session!=null&&session.hasSession();}
+    static synchronized void clearSession(){if(session!=null)session.clear();}
+    static void configureForTests(SessionCookies cookies,Transport testTransport){session=cookies;transport=testTransport;CookieHandler.setDefault(null);}
+    static void useStoreForTests(SessionStore store){stores=context->store;}
+    static void restoreTransport(){transport=url->(HttpURLConnection)url.openConnection();stores=SessionStore::new;}
+
     static JSONObject call(String path,JSONObject data) throws Exception {
         if(!path.startsWith("/api/")||path.contains("..")||path.contains("\\"))throw new IOException("Неверный адрес запроса.");
-        HttpURLConnection connection=(HttpURLConnection)new URL(ORIGIN+path).openConnection();
+        HttpURLConnection connection=transport.open(new URL(ORIGIN+path));
         connection.setConnectTimeout(30000);connection.setReadTimeout(130000);connection.setInstanceFollowRedirects(false);
         connection.setRequestProperty("Accept","application/json");
+        if(session==null)throw new IOException("Сначала инициализируйте вход приложения.");
+        String cookie=session.header();if(!cookie.isEmpty())connection.setRequestProperty("Cookie",cookie);
         try{
             if(data!=null){
                 connection.setRequestMethod("POST");connection.setRequestProperty("Origin",ORIGIN);connection.setRequestProperty("Content-Type","application/json");connection.setDoOutput(true);
@@ -24,6 +42,8 @@ final class ApiClient {
                 try(OutputStream out=connection.getOutputStream()){out.write(body);}
             }
             int status=connection.getResponseCode();
+            if(status==401)session.clear();
+            if(status>=200&&status<300&&(path.equals("/api/login")||path.equals("/api/logout")))session.accept(connection.getHeaderFields());
             InputStream stream=status>=400?connection.getErrorStream():connection.getInputStream();
             if(stream==null)throw new IOException("Пустой ответ сервера.");
             byte[] bytes;

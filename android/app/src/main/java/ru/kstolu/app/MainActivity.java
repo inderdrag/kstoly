@@ -34,15 +34,15 @@ public class MainActivity extends Activity {
     interface Done { void accept(Object value) throws Exception; }
 
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);prefs=getSharedPreferences("settings",MODE_PRIVATE);ApiClient.resetSession();readHistory();
+        super.onCreate(state);prefs=getSharedPreferences("settings",MODE_PRIVATE);ApiClient.initialize(this);readHistory();
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         if(Build.VERSION.SDK_INT>=35)getWindow().getDecorView().setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets bars=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(bars.left,bars.top,bars.right,bars.bottom);return insets;});
         if(state!=null){String uri=state.getString("cameraUri");if(uri!=null)cameraUri=Uri.parse(uri);receiptTarget=state.getBoolean("receiptTarget");}
-        home();
+        restoreAccess();
     }
     @Override public void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);if(cameraUri!=null)out.putString("cameraUri",cameraUri.toString());out.putBoolean("receiptTarget",receiptTarget);}
     @Override protected void onDestroy(){worker.shutdownNow();super.onDestroy();}
-    @Override public void onBackPressed(){if(busy){toast("Дождитесь завершения запроса. Повтор не запускается.");return;}if(page.equals("detail")){if(returnPage.equals("history"))showHistory();else showChoices();}else if(!page.equals("home"))home();else super.onBackPressed();}
+    @Override public void onBackPressed(){if(busy){toast("Дождитесь завершения запроса. Повтор не запускается.");return;}if(page.equals("login")||page.equals("session")){super.onBackPressed();return;}if(page.equals("detail")){if(returnPage.equals("history"))showHistory();else showChoices();}else if(!page.equals("home"))home();else super.onBackPressed();}
     private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
     private GradientDrawable background(int fill){GradientDrawable d=new GradientDrawable();d.setColor(fill);d.setCornerRadius(dp(14));d.setStroke(dp(1),BORDER);return d;}
     private void screen(String name,String heading){
@@ -67,7 +67,7 @@ public class MainActivity extends Activity {
         if(busy){toast("Запрос уже выполняется.");return;}busy=true;message("Запрос выполняется. Не отправляйте его повторно.");
         worker.execute(()->{Object value=null;Exception error=null;try{value=work.run();}catch(Exception e){error=e;}final Object result=value;final Exception failure=error;
             ui.post(()->{if(isFinishing()||isDestroyed())return;busy=false;if(failure!=null){
-                if(failure instanceof ApiClient.ApiError){ApiClient.ApiError e=(ApiClient.ApiError)failure;if(e.status==401)authenticated=false;if(e.failedJob)prefs.edit().remove("pendingImage").apply();}
+                if(failure instanceof ApiClient.ApiError){ApiClient.ApiError e=(ApiClient.ApiError)failure;if(e.status==401){authenticated=false;ApiClient.clearSession();loginPage("Войдите снова: срок входа истёк или сервер обновил сессию.");}if(e.failedJob)prefs.edit().remove("pendingImage").apply();}
                 message(failure.getMessage()==null?"Ошибка. Повтор автоматически не отправлен.":failure.getMessage());
             }else try{done.accept(result);}catch(Exception e){message("Не удалось сохранить результат: "+e.getMessage());}});
         });
@@ -80,14 +80,42 @@ public class MainActivity extends Activity {
         if(receiptPhoto!=null)button("Убрать чек",()->{receiptPhoto=null;home();});
         button("Подобрать блюда",()->{if(busy)return;if(productPhoto==null){toast("Сначала добавьте фото продуктов.");return;}if(!authenticated){login();return;}
             confirm("Передача фотографий","Фото продуктов и, если добавлен, чек будут переданы в AnyModel и поставщику модели. Подбор использует настроенный на сервере тариф. Цены в рецептах — ориентиры, если не прочитан чек.",()->analyze());});
-        button(authenticated?"Проверить соединение":"Войти по паролю приложения",()->{if(authenticated)task(()->ApiClient.call("/api/status",null),v->{authenticated=((JSONObject)v).optBoolean("authenticated");message(authenticated?"Сервер доступен. Вы вошли.":"Нужен вход по паролю.");});else login();});
+        button(authenticated?"Проверить соединение":"Войти по паролю приложения",()->{if(authenticated)task(()->ApiClient.call("/api/status",null),v->{authenticated=((JSONObject)v).optBoolean("authenticated");if(authenticated)message("Сервер доступен. Вы вошли.");else{ApiClient.clearSession();loginPage("Срок входа истёк. Введите пароль снова.");}});else login();});
         if(productPhoto!=null)button("Убрать выбранные фотографии",()->{productPhoto=null;receiptPhoto=null;home();});
         paragraph("Для подбора нужен интернет. После простоя сервер Render может запускаться около минуты. Пароли и ключи API в приложение не вшиты.");
     }
-    private void login(){
-        if(busy)return;EditText password=new EditText(this);password.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);password.setSingleLine(true);password.setSaveEnabled(false);password.setHint("Пароль приложения");password.setPadding(dp(24),dp(8),dp(24),dp(8));
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Войти в «К столу»").setMessage("Это APP_PASSWORD, не ключ AnyModel и не пароль GitHub. Пароль на устройстве не сохраняется.").setView(password).setNegativeButton("Отмена",null).setPositiveButton("Войти",null).create();
-        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{String value=password.getText().toString();password.setText("");dialog.dismiss();task(()->ApiClient.call("/api/login",new JSONObject().put("password",value)),result->{authenticated=true;home();message("Вход выполнен. Теперь можно подобрать блюда.");});}));dialog.show();
+    private void restoreAccess(){
+        authenticated=false;
+        if(!ApiClient.hasSession()){loginPage("");return;}
+        screen("session","Проверяем вход");nav.setVisibility(View.GONE);
+        paragraph("Вход сохранён на этом устройстве. Подключаемся к серверу — пароль повторно вводить не нужно.");
+        button("Повторить проверку",()->{if(!busy)restoreAccess();});
+        button("Открыть сохранённые рецепты без интернета",()->{if(!busy)showHistory();});
+        task(()->ApiClient.call("/api/status",null),result->{
+            if(((JSONObject)result).optBoolean("authenticated")){authenticated=true;home();}
+            else{ApiClient.clearSession();loginPage("Срок входа истёк. Введите пароль снова.");}
+        });
+    }
+    private void login(){if(!busy)loginPage("");}
+    private void loginPage(String reason){
+        authenticated=false;screen("login","Добро пожаловать\nв «К столу»");nav.setVisibility(View.GONE);
+        paragraph("Войдите один раз — приложение запомнит вход на этом телефоне.");
+        if(!reason.isEmpty())paragraph(reason);
+        EditText password=field("Пароль приложения","");
+        password.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);password.setSaveEnabled(false);
+        password.setAutofillHints(View.AUTOFILL_HINT_PASSWORD);
+        button("Войти",()->{
+            if(busy)return;String value=password.getText().toString();if(value.isEmpty()){message("Введите пароль приложения.");return;}
+            password.setText("");
+            task(()->{
+                ApiClient.call("/api/login",new JSONObject().put("password",value));
+                if(!ApiClient.hasSession())throw new java.io.IOException("Не удалось сохранить вход. Сервер не вернул сессию.");
+                JSONObject status=ApiClient.call("/api/status",null);
+                if(!status.optBoolean("authenticated")){ApiClient.clearSession();throw new java.io.IOException("Сервер не подтвердил вход. Подбор не запускался.");}
+                return status;
+            },result->{authenticated=true;home();message("Вы вошли. Теперь можно подобрать блюда.");});
+        });
+        space();paragraph("Нужен отдельный APP_PASSWORD из Render — не ключ AnyModel и не пароль GitHub. Сам пароль не сохраняется. Защищённая сессия действует до 7 дней, до выхода или изменения настроек сессии на сервере.");
     }
     private void photoMenu(boolean receipt){
         if(busy)return;receiptTarget=receipt;
@@ -162,8 +190,8 @@ public class MainActivity extends Activity {
         button("Сохранить настройки",()->{String r=region.getText().toString().trim();if(r.length()<2||r.length()>100){message("Укажите регион длиной от 2 до 100 символов.");return;}prefs.edit().putString("region",r).putString("currency",currency.getSelectedItem().toString()).putBoolean("generation",generation.isChecked()).apply();message("Настройки сохранены.");});
         button("Проверить генератор",()->task(()->ApiClient.call("/api/image-options",null),v->message(((JSONObject)v).optString("message"))));
         if(prefs.contains("pendingImage")){button("Продолжить получение прежнего фото",()->generate(true));button("Убрать незавершённое задание",()->confirm("Убрать задание?","Это не отменит его у поставщика. Следующее создание фото будет новым запросом.",()->{prefs.edit().remove("pendingImage").apply();settings();}));}
-        button("Выйти",()->task(()->ApiClient.call("/api/logout",new JSONObject()),v->{ApiClient.resetSession();authenticated=false;home();}));
-        paragraph("К столу · 0.7.0 · первая нативная версия\nДля распознавания и генерации нужен интернет. Секретные API-ключи находятся только на сервере. При удалении приложения локальная история исчезнет. Веб-версия и Windows используют отдельное хранилище.");
+        button("Выйти",()->{if(busy)return;ApiClient.clearSession();authenticated=false;loginPage("Вы вышли. Сохранённые рецепты остались на устройстве.");});
+        paragraph("К столу · 0.7.1 · запоминание входа\nДля распознавания и генерации нужен интернет. Секретные API-ключи находятся только на сервере. При удалении приложения локальная история исчезнет. Веб-версия и Windows используют отдельное хранилище.");
     }
     private void generate(boolean restore){
         if(busy)return;if(!authenticated){login();return;}if(!prefs.getBoolean("generation",false)){toast("Сначала разрешите генерацию в настройках.");return;}
