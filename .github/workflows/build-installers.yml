@@ -25,26 +25,51 @@ jobs:
     if: inputs.target == 'both' || inputs.target == 'windows'
     runs-on: windows-latest
     timeout-minutes: 25
-    defaults:
-      run:
-        working-directory: desktop
     steps:
-      - uses: actions/checkout@v4
+      # The repository ends in a dot. Windows normalizes trailing dots, so the
+      # default checkout workspace is not a reliable path for this repository.
+      - name: Download exact source commit into a safe Windows path
+        shell: pwsh
+        working-directory: ${{ runner.temp }}
+        env:
+          SOURCE_TOKEN: ${{ github.token }}
+          SOURCE_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'k-stolu-build'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $archive = Join-Path $root 'source.zip'
+          $unpack = Join-Path $root 'unpack'
+          $uri = "https://api.github.com/repos/$($env:SOURCE_REPO)/zipball/$($env:SOURCE_SHA)"
+          $headers = @{ Authorization = "Bearer $env:SOURCE_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          Invoke-WebRequest -Uri $uri -Headers $headers -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $unpack -Force
+          $folders = @(Get-ChildItem -LiteralPath $unpack -Directory)
+          if ($folders.Count -ne 1) { throw 'Unexpected source archive layout' }
+          Move-Item -LiteralPath $folders[0].FullName -Destination (Join-Path $root 'source')
+          if (!(Test-Path -LiteralPath (Join-Path $root 'source/desktop/package.json'))) { throw 'Desktop source is missing' }
+          Remove-Item -LiteralPath $archive
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
-      - run: node ../scripts/prepare-installer-assets.mjs
+          cache-dependency-path: ${{ runner.temp }}/k-stolu-build/source/desktop/package-lock.json
+      - name: Prepare approved app icon
+        run: node ../scripts/prepare-installer-assets.mjs
+        working-directory: ${{ runner.temp }}/k-stolu-build/source/desktop
       - run: npm ci
+        working-directory: ${{ runner.temp }}/k-stolu-build/source/desktop
       - run: npm test
+        working-directory: ${{ runner.temp }}/k-stolu-build/source/desktop
       - run: npm run dist:win
+        working-directory: ${{ runner.temp }}/k-stolu-build/source/desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - uses: actions/upload-artifact@v4
         with:
           name: Windows-x64-installer
-          path: desktop/dist/*Setup.exe
+          path: ${{ runner.temp }}/k-stolu-build/source/desktop/dist/*Setup.exe
           if-no-files-found: error
           retention-days: 14
   android:
@@ -60,14 +85,30 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
       - name: Prepare approved app icon
         run: node ../scripts/prepare-installer-assets.mjs
-      - name: Install SDK
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Check preinstalled SDK; install only missing required packages
+        shell: bash
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$sdk" ]; then echo '::error::Android SDK path is missing'; exit 1; fi
+          if [ -f "$sdk/platforms/android-35/android.jar" ] && [ -x "$sdk/build-tools/35.0.0/apksigner" ]; then
+            echo 'Required SDK 35 and build-tools 35.0.0 are already installed.'
+          else
+            manager="$sdk/cmdline-tools/latest/bin/sdkmanager"
+            if [ ! -x "$manager" ]; then echo '::error::Preinstalled sdkmanager is missing'; exit 1; fi
+            set +o pipefail
+            yes | "$manager" --licenses > "$RUNNER_TEMP/android-licenses.log" 2>&1
+            license_status=${PIPESTATUS[1]}
+            set -o pipefail
+            if [ "$license_status" -ne 0 ]; then tail -n 30 "$RUNNER_TEMP/android-licenses.log"; exit "$license_status"; fi
+            "$manager" 'platforms;android-35' 'build-tools;35.0.0'
+          fi
       - name: Cache preview signing key (NOT a production key)
         if: ${{ !inputs.android_release }}
         uses: actions/cache@v4
