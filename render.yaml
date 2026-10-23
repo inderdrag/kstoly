@@ -18,6 +18,8 @@ services:
         value: ds/deepseek-v4-flash
       - key: DAILY_CHAT_LIMIT
         value: "100"
+      - key: SELECTION_TIMEOUT_SECONDS
+        value: "300"
       - key: DAILY_REQUEST_LIMIT
         value: "20"
       - key: DAILY_UPSTREAM_LIMIT

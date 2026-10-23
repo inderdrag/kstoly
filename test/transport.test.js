@@ -15,7 +15,7 @@ test('interrupted photo upload is 408, not an unclassified 500',async()=>{
 });
 test('provider abort after headers is 504 and cannot fall into recipe retry',async()=>{
  const r=new Response(new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('{'));c.error(new DOMException('secret provider details','AbortError'));}}));
- await assert.rejects(readModelResponse(r),e=>e.status===504&&!e.message.includes('secret')&&e.message.includes('55 секунд'));
+ await assert.rejects(readModelResponse(r),e=>e.status===504&&!e.message.includes('secret')&&e.message.includes('время ожидания'));
 });
 test('provider body stream failure is 502',async()=>{
  const r=new Response(new ReadableStream({start(c){c.error(new TypeError('private details'));}}));

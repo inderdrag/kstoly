@@ -12,11 +12,11 @@ test('HTTP four maximum-size photos, receipt, interrupted response, validation a
   assert.equal((await send(payload)).status,200);assert.match(logs,/TEST_UPSTREAM_CALL 5/);
   const single={image,region:'TestCity',currency:'RUB',consent:true};assert.equal((await send(single)).status,200);
   const callsBefore=(logs.match(/TEST_UPSTREAM_CALL/g)||[]).length;assert.equal((await send(null)).status,400);assert.equal((await send({...single,image:'not JPEG'})).status,400);assert.equal((logs.match(/TEST_UPSTREAM_CALL/g)||[]).length,callsBefore);
-  let r=await send({...single,region:'TestAbort'});assert.equal(r.status,504);let out=await r.json();assert.equal(out.stage,'upstream_body');assert.match(out.requestId,/^[a-f0-9]{8}$/);assert.match(out.error,/55 секунд/);
+  let r=await send({...single,region:'TestAbort'});assert.equal(r.status,504);let out=await r.json();assert.equal(out.stage,'upstream_body');assert.match(out.requestId,/^[a-f0-9]{8}$/);assert.match(out.error,/время ожидания/);
   r=await send({...single,region:'TestNull'});assert.equal(r.status,502);assert.equal((await r.json()).stage,'upstream_body');
   assert.equal((await send(single)).status,200); // inFlight released after each failure
   assert.equal((logs.match(/TEST_UPSTREAM_CALL/g)||[]).length,5); // no automatic paid retries
   const traces=logs.split('\n').filter(x=>x.startsWith('{')).map(JSON.parse);assert.ok(traces.some(x=>x.event==='analyze_error'&&x.status===504));assert.equal(JSON.stringify(traces).includes('base64'),false);assert.equal(JSON.stringify(traces).includes('fake-key'),false);
-  assert.equal((await(await fetch(origin+'/api/status')).json()).build,'1.1.0');
+  assert.equal((await(await fetch(origin+'/api/status')).json()).build,'1.1.1');
  }finally{const exited=new Promise(r=>child.once('exit',r));child.kill();await exited;await rm(dir,{recursive:true,force:true});}
 });

@@ -16,7 +16,7 @@ export async function readModelResponse(response){
  try{
   reader=response.body.getReader();
   for(;;){const {done,value}=await reader.read();if(done)break;len+=value.byteLength;if(len>256000){await reader.cancel().catch(()=>{});throw failure('Слишком большой ответ AnyModel.',502);}chunks.push(value);}
- }catch(e){if(e.status)throw e;const timeout=['AbortError','TimeoutError'].includes(e.name);throw failure(timeout?'Ожидание ответа AnyModel превысило 55 секунд. Ответ не получен полностью. Новый запрос автоматически не отправлен.':'Соединение с AnyModel прервалось при получении ответа. Новый запрос автоматически не отправлен.',timeout?504:502);}
+ }catch(e){if(e.status)throw e;const timeout=['AbortError','TimeoutError'].includes(e.name);throw failure(timeout?'Превышено время ожидания полного ответа AnyModel. Запрос мог быть оплачен. Новый запрос автоматически не отправлен.':'Соединение с AnyModel прервалось при получении ответа. Новый запрос автоматически не отправлен.',timeout?504:502);}
  finally{reader?.releaseLock();}
  let data;try{data=JSON.parse(Buffer.concat(chunks).toString());}catch{throw failure('AnyModel вернул непонятный ответ. Новый запрос автоматически не отправлен.',502);}
  if(!data||typeof data!=='object'||Array.isArray(data)||!Array.isArray(data.choices)||!data.choices[0]?.message)throw failure('AnyModel не вернул результат модели. Новый запрос автоматически не отправлен.',502);

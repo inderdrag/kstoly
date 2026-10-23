@@ -1,0 +1,4 @@
+if(process.env.NODE_ENV!=='test')throw Error('Test only');
+import {appendFileSync} from 'node:fs';
+const timeout=AbortSignal.timeout.bind(AbortSignal);AbortSignal.timeout=ms=>{if(ms<55001)throw Error('Selection timeout regression');return timeout(ms)};
+globalThis.fetch=async(url,init)=>{if(url!=='https://anymodel.org/v1/chat/completions')throw Error('Unexpected network');const req=JSON.parse(init.body);appendFileSync(process.env.QA_CAPTURE,'call\n');if(req.messages[1].content.filter(x=>x.type==='image_url').length!==4)throw Error('Expected four photos');await new Promise(r=>setTimeout(r,Number(process.env.QA_DELAY_MS)||200));if(init.signal.aborted)throw init.signal.reason;return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({status:'not_food',message:'Тест без внешнего API: длинный ответ получен.'})}}]})};
