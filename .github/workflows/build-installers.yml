@@ -146,9 +146,9 @@ jobs:
           set -euo pipefail
           mkdir -p out
           if [ "$RELEASE_MODE" = true ]; then
-            cp app/build/outputs/apk/release/app-release.apk out/K-Stolu-0.8.0-Android.apk
+            cp app/build/outputs/apk/release/app-release.apk out/K-Stolu-0.9.0-Android.apk
           else
-            cp app/build/outputs/apk/debug/app-debug.apk out/K-Stolu-0.8.0-Android-PREVIEW.apk
+            cp app/build/outputs/apk/debug/app-debug.apk out/K-Stolu-0.9.0-Android-PREVIEW.apk
           fi
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose out/*.apk
       - uses: actions/upload-artifact@v4
@@ -182,4 +182,4 @@ jobs:
       - name: Create draft (not published automatically)
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "installers-0.8.0-run-${GITHUB_RUN_NUMBER}" installers/* --draft --prerelease --target "$GITHUB_SHA" --title "К столу — Android 0.8.0 / Windows 0.7.0" --notes-file notes.md
+        run: gh release create "installers-0.9.0-run-${GITHUB_RUN_NUMBER}" installers/* --draft --prerelease --target "$GITHUB_SHA" --title "К столу — Android 0.9.0 / Windows 0.7.0" --notes-file notes.md

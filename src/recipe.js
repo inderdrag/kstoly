@@ -18,7 +18,7 @@ export function validateRecipe(data,{receipt=false,currency='RUB'}={}) {
   if(!number(data.prep_minutes,0,240))fail('prep_minutes');
   if(!number(data.cook_minutes,0,720))fail('cook_minutes');
   if(!Array.isArray(data.ingredients)||data.ingredients.length<1||data.ingredients.length>30)fail('ingredients');
-  if(!Array.isArray(data.steps)||data.steps.length<1||data.steps.length>15)fail('steps');
+  if(!Array.isArray(data.steps)||data.steps.length<1||data.steps.length>20)fail('steps');
   const ingredients=data.ingredients.map((i,index)=>{
     const key='ingredients['+index+']';
     if(!obj(i))fail(key);
@@ -40,7 +40,7 @@ export function validateRecipe(data,{receipt=false,currency='RUB'}={}) {
     }
     return {name:i.name,amount:i.amount,unit:i.unit,price};
   });
-  const steps=data.steps.map((step,index)=>{if(!obj(step)||!text(step.title,100)||!text(step.body,1200))fail('steps['+index+']');return {title:step.title,body:step.body};});
+  const steps=data.steps.map((step,index)=>{if(!obj(step)||!text(step.title,100)||!text(step.body,2600))fail('steps['+index+']');const timer=Number.isInteger(step.timer_seconds)&&number(step.timer_seconds,1,21600)?{timer_seconds:step.timer_seconds,...(text(step.timer_hint,240)?{timer_hint:step.timer_hint}:{})}:{};return {title:step.title,body:step.body,...timer};});
   const warnings=data.warnings===undefined?[]:data.warnings;
   if(!Array.isArray(warnings)||warnings.length>12||warnings.some(x=>!text(x,400)))fail('warnings');
   if(data.image_prompt!==undefined&&(!text(data.image_prompt,1000)||data.image_prompt.trim().length<40||!/[A-Za-z]/.test(data.image_prompt)||/[А-Яа-яЁё<>]/.test(data.image_prompt)))fail('image_prompt');
@@ -48,7 +48,7 @@ export function validateRecipe(data,{receipt=false,currency='RUB'}={}) {
   // Nutrition is optional for old recipes. Discard invalid estimates instead of retrying a paid model call.
   const n=data.nutrition;
   const nutrition=obj(n)&&n.source==='estimate'&&number(n.kcal_per_serving,1,5000)?{source:'estimate',kcal_per_serving:Math.max(5,Math.round(n.kcal_per_serving/5)*5)}:null;
-  return {status:'ok',...(data.meal_type?{meal_type:data.meal_type}:{}),...(nutrition?{nutrition}:{}),...(data.image_prompt?{image_prompt:data.image_prompt.trim()}:{}),title:data.title,description:data.description,servings:data.servings,prep_minutes:data.prep_minutes,cook_minutes:data.cook_minutes,ingredients,steps,warnings};
+  return {status:'ok',...(data.meal_type?{meal_type:data.meal_type}:{}),...(nutrition?{nutrition}:{}),...(Array.isArray(data.equipment)&&data.equipment.length<=6&&data.equipment.every(x=>['hob','oven','microwave','kettle','none'].includes(x))?{equipment:[...new Set(data.equipment)]}:{}),...(data.image_prompt?{image_prompt:data.image_prompt.trim()}:{}),title:data.title,description:data.description,servings:data.servings,prep_minutes:data.prep_minutes,cook_minutes:data.cook_minutes,ingredients,steps,warnings};
 }
 export function parseRecipe(raw,options){
   if(typeof raw!=='string'||raw.length>60000)throw new RecipeError('Пустой или слишком большой ответ модели.');
@@ -87,7 +87,7 @@ export function jpegInfo(dataUrl){
 }
 
 export function parseRecipeSelection(raw,options){
-  if(typeof raw!=='string'||raw.length>180000)throw new RecipeError('Пустой или слишком большой ответ модели.');
+  if(typeof raw!=='string'||raw.length>240000)throw new RecipeError('Пустой или слишком большой ответ модели.');
   let source=raw.trim();if(source.startsWith('```'))source=source.replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'');
   let value;try{value=JSON.parse(source)}catch{throw new RecipeError('Модель вернула невалидный JSON.')}
   if(value?.status!=='ok')return validateRecipe(value,options);
@@ -97,6 +97,10 @@ export function parseRecipeSelection(raw,options){
   // Old saved single recipes stay compatible; selection balance is checked only for 3+ options.
   const saladLimit=recipes.length>=6?2:1;
   if(recipes.length>=3&&recipes.filter(isSalad).length>saladLimit)throw new RecipeError('В подборе слишком много салатов. Для 3–5 блюд допустим 1 салат, для 6–10 — не больше 2. Нужны другие способы приготовления, а не новые названия салатов.');
+  const preferences=options?.preferences||[];
+  if(preferences.includes('no_salads')&&recipes.some(isSalad))throw new RecipeError('Выбрано Без салатов. Замените салаты другими блюдами.');
+  if(preferences.includes('quick')&&recipes.some(r=>r.prep_minutes+r.cook_minutes>20))throw new RecipeError('Выбрано До 20 минут, с учётом подготовки.');
+  if(preferences.includes('no_oven')&&recipes.some(r=>r.equipment?.includes('oven')||/духовк|разогрейте печь|выпекайте|запекайте/iu.test(r.steps.map(s=>s.body).join(' '))))throw new RecipeError('Выбрано Без духовки. Предложите приготовление на плите или без нагрева.');
   recipes.sort((a,b)=>Number(isSalad(a))-Number(isSalad(b)));
   return {status:'ok',recipes};
 }
