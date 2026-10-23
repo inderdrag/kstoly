@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {createSousChef} from './sous-chef.js';
 import {readRequest as body,readModelResponse,traceSelection} from './transport.js';
 import {createImageService} from './images.js';
 import {readFile,mkdir} from 'node:fs/promises';
@@ -19,6 +20,9 @@ if(!origin||PRODUCTION&&!origin.startsWith('https://')){console.error('Зада�
 const DAILY=Math.max(1,Math.min(100,Number(process.env.DAILY_REQUEST_LIMIT)||20));const UPSTREAM=Math.max(1,Math.min(200,Number(process.env.DAILY_UPSTREAM_LIMIT)||30));
 const dir=path.resolve(process.env.DATA_DIR||'./var');await mkdir(dir,{recursive:true});const db=new DatabaseSync(path.join(dir,'quota.db'));db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS usage(day TEXT PRIMARY KEY, requests INTEGER NOT NULL DEFAULT 0, upstream INTEGER NOT NULL DEFAULT 0)');
 const imageService=createImageService({db,key:API_KEY,cloudflareAccount:process.env.CLOUDFLARE_ACCOUNT_ID||'',cloudflareToken:process.env.CLOUDFLARE_API_TOKEN||'',cloudflareFreePlan:process.env.CLOUDFLARE_FREE_PLAN_CONFIRMED==='true'});
+const chatModel=process.env.ANYMODEL_CHAT_MODEL||'ds/deepseek-v4-flash';
+const sousChef=createSousChef({db,key:API_KEY,model:chatModel,limit:Math.max(1,Math.min(500,Number(process.env.DAILY_CHAT_LIMIT)||100))});
+const selectionProgress=new Map();
 let inFlight=false;const publicLimit=createPublicLimiter(db,{limit:Math.max(1,Math.min(100,Number(process.env.PUBLIC_BURST_LIMIT)||3))});
 const headers={
  'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY',
@@ -37,7 +41,7 @@ async function upstream(messages,trace){
  trace?.mark('upstream_body');
  return await readModelResponse(response);
 }
-const files=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/photos.js','photos.js'],['/generated.js','generated.js'],['/photos/pesto-pasta.jpg','photos/pesto-pasta.jpg'],['/photos/vegetable-salad.jpg','photos/vegetable-salad.jpg'],['/sw.js','sw.js'],['/manifest.webmanifest','manifest.webmanifest'],['/icon-192.png','icon-192.png'],['/icon-512.png','icon-512.png']]);
+const files=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/sous-chef.js','sous-chef.js'],['/photos.js','photos.js'],['/generated.js','generated.js'],['/photos/pesto-pasta.jpg','photos/pesto-pasta.jpg'],['/photos/vegetable-salad.jpg','photos/vegetable-salad.jpg'],['/sw.js','sw.js'],['/manifest.webmanifest','manifest.webmanifest'],['/icon-192.png','icon-192.png'],['/icon-512.png','icon-512.png']]);
 const server=http.createServer(async(req,res)=>{
  let trace;
  try{
@@ -45,8 +49,15 @@ const server=http.createServer(async(req,res)=>{
  if(req.method==='POST'){
    if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Запрос разрешён только с адреса приложения.'});
  }
- if(req.method==='POST'&&['/api/analyze','/api/images'].includes(pathname)){const rate=publicLimit(req.socket.remoteAddress);if(!rate.ok)return json(res,429,{error:'Слишком много запросов. Подождите '+rate.retryAfter+' сек. Повтор автоматически не отправлен.'},{'Retry-After':String(rate.retryAfter)});}
- if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:true,configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'1.0.1'});
+ if(req.method==='POST'&&['/api/analyze','/api/images','/api/chat'].includes(pathname)){const rate=publicLimit(req.socket.remoteAddress);if(!rate.ok)return json(res,429,{error:'Слишком много запросов. Подождите '+rate.retryAfter+' сек. Повтор автоматически не отправлен.'},{'Retry-After':String(rate.retryAfter)});}
+ if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:true,configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'1.1.0',chatConfigured:Boolean(API_KEY),chatModel});
+ if(pathname.startsWith('/api/chat-status/')&&req.method==='GET')return json(res,200,sousChef.lookup(pathname.slice('/api/chat-status/'.length)));
+ if(pathname==='/api/chat'&&req.method==='POST')return json(res,200,await sousChef(await body(req,140000)));
+ if(pathname.startsWith('/api/analyze-progress/')&&req.method==='GET'){
+   const id=pathname.slice('/api/analyze-progress/'.length),entry=selectionProgress.get(id);
+   if(!entry||Date.now()-entry.time>180000)return json(res,200,{stage:'waiting'});
+   return json(res,200,{stage:entry.stage});
+ }
  // Compatibility for installed older clients; no credential is checked or stored.
  if(['/api/login','/api/logout'].includes(pathname)&&req.method==='POST')return json(res,200,{ok:true});
  if(pathname==='/api/image-options'&&req.method==='GET'){
@@ -63,7 +74,11 @@ const server=http.createServer(async(req,res)=>{
    if(inFlight)return json(res,429,{error:'Один запрос уже выполняется. Подождите его завершения.'});
    inFlight=true;trace=traceSelection();trace.mark('upload');
    try{
-     const data=await body(req,15*1024*1024);if(data.consent!==true)return json(res,400,{error:'Нужно согласие на передачу фото в AnyModel и поставщику модели.'});
+     const data=await body(req,15*1024*1024);
+     if(/^[a-zA-Z0-9_-]{16,80}$/.test(data.progressId||'')){
+       const id=data.progressId;for(const [k,v] of selectionProgress)if(Date.now()-v.time>180000)selectionProgress.delete(k);if(selectionProgress.size>=100)selectionProgress.delete(selectionProgress.keys().next().value);
+       const mark=trace.mark.bind(trace);trace.mark=stage=>{mark(stage);selectionProgress.set(id,{stage,time:Date.now()});};trace.mark('validation');
+     }if(data.consent!==true)return json(res,400,{error:'Нужно согласие на передачу фото в AnyModel и поставщику модели.'});
      if(typeof data.region!=='string'||data.region.trim().length<2||data.region.length>100||!['RUB','KZT','BYN','EUR','USD'].includes(data.currency))return json(res,400,{error:'Укажите регион и валюту в настройках.'});
      trace.mark('validation');const input=selectionInput(data);
      trace.mark('quota');

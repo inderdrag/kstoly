@@ -14,6 +14,10 @@ services:
         sync: false
       - key: ANYMODEL_MODEL
         value: ag/gemini-2.5-flash
+      - key: ANYMODEL_CHAT_MODEL
+        value: ds/deepseek-v4-flash
+      - key: DAILY_CHAT_LIMIT
+        value: "100"
       - key: DAILY_REQUEST_LIMIT
         value: "20"
       - key: DAILY_UPSTREAM_LIMIT

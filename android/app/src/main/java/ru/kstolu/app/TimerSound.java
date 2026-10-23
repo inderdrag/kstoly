@@ -5,7 +5,7 @@ import android.os.Handler;
 import android.os.Looper;
 /** One fixed local alarm, no network, ringtone selection or stored sound settings.
  * Only used for a consumed expiry; never for pause, manual navigation or rendering.
- * The alarm stream respects system volume and DND. Background delivery is not promised. */
+ * The alarm stream respects system volume and DND. Background delivery is handled by TimerAlarmReceiver when Android permits it. */
 final class TimerSound {
  private TimerSound(){}
  private static ToneGenerator tone;

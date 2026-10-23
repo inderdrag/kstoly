@@ -41,7 +41,7 @@ export function validateRecipe(data,{receipt=false,currency='RUB'}={}) {
     }
     return {name:i.name,amount:i.amount,unit:i.unit,price};
   });
-  const steps=data.steps.map((step,index)=>{if(!obj(step)||!text(step.title,100)||!text(step.body,2600))fail('steps['+index+']');const timer=Number.isInteger(step.timer_seconds)&&number(step.timer_seconds,1,21600)?{timer_seconds:step.timer_seconds,...(text(step.timer_hint,240)?{timer_hint:step.timer_hint}:{})}:{};return {title:step.title,body:step.body,...timer};});
+  const steps=data.steps.map((step,index)=>{if(!obj(step)||!text(step.title,100)||!text(step.body,2600))fail('steps['+index+']');const timer=Number.isInteger(step.timer_seconds)&&number(step.timer_seconds,1,21600)?{timer_seconds:step.timer_seconds,...(text(step.timer_hint,240)?{timer_hint:step.timer_hint}:{})}:{};const indexes=Array.isArray(step.ingredient_indexes)&&step.ingredient_indexes.length<=30&&step.ingredient_indexes.every(n=>Number.isInteger(n)&&n>=0&&n<ingredients.length)?{ingredient_indexes:[...new Set(step.ingredient_indexes)]}:{};return {title:step.title,body:step.body,...timer,...indexes};});
   const warnings=data.warnings===undefined?[]:data.warnings;
   if(!Array.isArray(warnings)||warnings.length>12||warnings.some(x=>!text(x,400)))fail('warnings');
   if(data.image_prompt!==undefined&&(!text(data.image_prompt,1000)||data.image_prompt.trim().length<40||!/[A-Za-z]/.test(data.image_prompt)||/[А-Яа-яЁё<>]/.test(data.image_prompt)))fail('image_prompt');
