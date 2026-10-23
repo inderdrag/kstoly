@@ -41,7 +41,10 @@ export function validateRecipe(data,{receipt=false,currency='RUB'}={}) {
   const warnings=data.warnings===undefined?[]:data.warnings;
   if(!Array.isArray(warnings)||warnings.length>12||warnings.some(x=>!text(x,400)))fail('warnings');
   if(data.image_prompt!==undefined&&(!text(data.image_prompt,1000)||data.image_prompt.trim().length<40||!/[A-Za-z]/.test(data.image_prompt)||/[А-Яа-яЁё<>]/.test(data.image_prompt)))fail('image_prompt');
-  return {status:'ok',...(data.image_prompt?{image_prompt:data.image_prompt.trim()}:{}),title:data.title,description:data.description,servings:data.servings,prep_minutes:data.prep_minutes,cook_minutes:data.cook_minutes,ingredients,steps,warnings};
+  // Nutrition is optional for old recipes. Discard invalid estimates instead of retrying a paid model call.
+  const n=data.nutrition;
+  const nutrition=obj(n)&&n.source==='estimate'&&number(n.kcal_per_serving,1,5000)?{source:'estimate',kcal_per_serving:Math.max(5,Math.round(n.kcal_per_serving/5)*5)}:null;
+  return {status:'ok',...(nutrition?{nutrition}:{}),...(data.image_prompt?{image_prompt:data.image_prompt.trim()}:{}),title:data.title,description:data.description,servings:data.servings,prep_minutes:data.prep_minutes,cook_minutes:data.cook_minutes,ingredients,steps,warnings};
 }
 export function parseRecipe(raw,options){
   if(typeof raw!=='string'||raw.length>60000)throw new RecipeError('Пустой или слишком большой ответ модели.');
