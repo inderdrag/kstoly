@@ -1,4 +1,7 @@
 export class RecipeError extends Error {}
+export const MAX_RECIPES=10;
+const mealTypes=new Set(['main','soup','side','breakfast','bake','salad','snack','dessert']);
+const isSalad=r=>r.meal_type==='salad'||/(?:^|[^\p{L}])(?:салат|винегрет|оливье|табуле|коул[ -]?слоу|coleslaw|цезарь)(?=$|[^\p{L}])/iu.test(r.title);
 const obj=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 const text=(x,n=600)=>typeof x==='string'&&x.trim().length>0&&x.length<=n;
 const number=(x,min,max)=>typeof x==='number'&&Number.isFinite(x)&&x>=min&&x<=max;
@@ -41,10 +44,11 @@ export function validateRecipe(data,{receipt=false,currency='RUB'}={}) {
   const warnings=data.warnings===undefined?[]:data.warnings;
   if(!Array.isArray(warnings)||warnings.length>12||warnings.some(x=>!text(x,400)))fail('warnings');
   if(data.image_prompt!==undefined&&(!text(data.image_prompt,1000)||data.image_prompt.trim().length<40||!/[A-Za-z]/.test(data.image_prompt)||/[А-Яа-яЁё<>]/.test(data.image_prompt)))fail('image_prompt');
+  if(data.meal_type!==undefined&&!mealTypes.has(data.meal_type))fail('meal_type');
   // Nutrition is optional for old recipes. Discard invalid estimates instead of retrying a paid model call.
   const n=data.nutrition;
   const nutrition=obj(n)&&n.source==='estimate'&&number(n.kcal_per_serving,1,5000)?{source:'estimate',kcal_per_serving:Math.max(5,Math.round(n.kcal_per_serving/5)*5)}:null;
-  return {status:'ok',...(nutrition?{nutrition}:{}),...(data.image_prompt?{image_prompt:data.image_prompt.trim()}:{}),title:data.title,description:data.description,servings:data.servings,prep_minutes:data.prep_minutes,cook_minutes:data.cook_minutes,ingredients,steps,warnings};
+  return {status:'ok',...(data.meal_type?{meal_type:data.meal_type}:{}),...(nutrition?{nutrition}:{}),...(data.image_prompt?{image_prompt:data.image_prompt.trim()}:{}),title:data.title,description:data.description,servings:data.servings,prep_minutes:data.prep_minutes,cook_minutes:data.cook_minutes,ingredients,steps,warnings};
 }
 export function parseRecipe(raw,options){
   if(typeof raw!=='string'||raw.length>60000)throw new RecipeError('Пустой или слишком большой ответ модели.');
@@ -87,8 +91,12 @@ export function parseRecipeSelection(raw,options){
   let source=raw.trim();if(source.startsWith('```'))source=source.replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'');
   let value;try{value=JSON.parse(source)}catch{throw new RecipeError('Модель вернула невалидный JSON.')}
   if(value?.status!=='ok')return validateRecipe(value,options);
-  if(!Array.isArray(value.recipes)||value.recipes.length<1||value.recipes.length>5)throw new RecipeError('Ожидаются от 1 до 5 рецептов на выбор.');
+  if(!Array.isArray(value.recipes)||value.recipes.length<1||value.recipes.length>MAX_RECIPES)throw new RecipeError('Ожидаются от 1 до 10 рецептов на выбор.');
   const recipes=value.recipes.map((r,index)=>{try{const recipe=validateRecipe(obj(r)&&r.status===undefined?{...r,status:'ok'}:r,options);if(recipe.status!=='ok')throw new RecipeError('В списке должен быть полный рецепт.');return recipe}catch(e){if(e instanceof RecipeError)throw new RecipeError('recipes['+index+']: '+e.message);throw e}});
   if(new Set(recipes.map(r=>r.title.trim().toLocaleLowerCase('ru'))).size!==recipes.length)throw new RecipeError('Названия вариантов должны различаться.');
+  // Old saved single recipes stay compatible; selection balance is checked only for 3+ options.
+  const saladLimit=recipes.length>=6?2:1;
+  if(recipes.length>=3&&recipes.filter(isSalad).length>saladLimit)throw new RecipeError('В подборе слишком много салатов. Для 3–5 блюд допустим 1 салат, для 6–10 — не больше 2. Нужны другие способы приготовления, а не новые названия салатов.');
+  recipes.sort((a,b)=>Number(isSalad(a))-Number(isSalad(b)));
   return {status:'ok',recipes};
 }
