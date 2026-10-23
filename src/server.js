@@ -46,7 +46,7 @@ const server=http.createServer(async(req,res)=>{
    if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Запрос разрешён только с адреса приложения.'});
  }
  if(req.method==='POST'&&['/api/analyze','/api/images'].includes(pathname)){const rate=publicLimit(req.socket.remoteAddress);if(!rate.ok)return json(res,429,{error:'Слишком много запросов. Подождите '+rate.retryAfter+' сек. Повтор автоматически не отправлен.'},{'Retry-After':String(rate.retryAfter)});}
- if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:true,configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'1.0.0'});
+ if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:true,configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'1.0.1'});
  // Compatibility for installed older clients; no credential is checked or stored.
  if(['/api/login','/api/logout'].includes(pathname)&&req.method==='POST')return json(res,200,{ok:true});
  if(pathname==='/api/image-options'&&req.method==='GET'){
