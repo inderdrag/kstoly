@@ -7,10 +7,12 @@ var/
 *.db-shm
 *.db-wal
 *.log
-
-# Generated from scripts/assets.json by npm pretest/prestart
 /public/icon-192.png
 /public/icon-512.png
-/test/fixture.jpg
-
 /public/photos/*.jpg
+/test/fixture.jpg
+android/.gradle/
+android/**/build/
+android/local.properties
+*.keystore
+*.jks

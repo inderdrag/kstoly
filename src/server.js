@@ -4,33 +4,29 @@ import {createImageService} from './images.js';
 import {readFile,mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createHmac,timingSafeEqual,randomBytes,scryptSync,createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {parseRecipeSelection,jpegInfo,RecipeError,calculateCost} from './recipe.js';
 import {selectionInput} from './selection.js';
+import {automaticEstimates} from './estimates.js';
+import {createPublicLimiter} from './rate-limit.js';
 import {SYSTEM_PROMPT,SELECTION_RULES} from './prompt.js';
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../public');
-const PASSWORD=process.env.APP_PASSWORD||'',SECRET=process.env.SESSION_SECRET||'',API_KEY=process.env.ANYMODEL_API_KEY||'';
+const API_KEY=process.env.ANYMODEL_API_KEY||'';
 const MODEL=process.env.ANYMODEL_MODEL||'ag/gemini-2.5-flash';
 const PORT=Number(process.env.PORT||3000),PRODUCTION=process.env.NODE_ENV==='production';
 const origin=process.env.PUBLIC_ORIGIN||process.env.RENDER_EXTERNAL_URL||(PRODUCTION?'':`http://localhost:${PORT}`);
-if(PASSWORD.length<16||SECRET.length<32||!origin||PRODUCTION&&!origin.startsWith('https://')){console.error('Задайте APP_PASSWORD (16+), SESSION_SECRET (32+) и PUBLIC_ORIGIN (HTTPS в production).');process.exit(1);}
-const passwordHash=scryptSync(PASSWORD,'oliva-owner-password-v1',32);const DAILY=Math.max(1,Math.min(100,Number(process.env.DAILY_REQUEST_LIMIT)||20));const UPSTREAM=Math.max(1,Math.min(200,Number(process.env.DAILY_UPSTREAM_LIMIT)||30));
+if(!origin||PRODUCTION&&!origin.startsWith('https://')){console.error('Задайте PUBLIC_ORIGIN (HTTPS в production).');process.exit(1);}
+const DAILY=Math.max(1,Math.min(100,Number(process.env.DAILY_REQUEST_LIMIT)||20));const UPSTREAM=Math.max(1,Math.min(200,Number(process.env.DAILY_UPSTREAM_LIMIT)||30));
 const dir=path.resolve(process.env.DATA_DIR||'./var');await mkdir(dir,{recursive:true});const db=new DatabaseSync(path.join(dir,'quota.db'));db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS usage(day TEXT PRIMARY KEY, requests INTEGER NOT NULL DEFAULT 0, upstream INTEGER NOT NULL DEFAULT 0)');
 const imageService=createImageService({db,key:API_KEY,cloudflareAccount:process.env.CLOUDFLARE_ACCOUNT_ID||'',cloudflareToken:process.env.CLOUDFLARE_API_TOKEN||'',cloudflareFreePlan:process.env.CLOUDFLARE_FREE_PLAN_CONFIRMED==='true'});
-let inFlight=false;const loginAttempts=new Map();
+let inFlight=false;const publicLimit=createPublicLimiter(db,{limit:Math.max(1,Math.min(100,Number(process.env.PUBLIC_BURST_LIMIT)||3))});
 const headers={
  'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY',
  'Permissions-Policy':'camera=(self), microphone=(), geolocation=()',
  'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 };if(PRODUCTION)headers['Strict-Transport-Security']='max-age=31536000';
 function json(res,status,value,extra={}){res.writeHead(status,{...headers,'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...extra});res.end(JSON.stringify(value));}
-function sign(value){return createHmac('sha256',SECRET).update(value).digest('base64url');}
-function equal(a,b){const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&timingSafeEqual(x,y);}
-function authenticated(req){const cookie=String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('oliva_session='));if(!cookie)return false;const value=cookie.slice(14);const [body,signature]=value.split('.');if(!body||!signature||!equal(sign(body),signature))return false;try{const data=JSON.parse(Buffer.from(body,'base64url').toString());return data.user==='owner'&&Number.isFinite(data.exp)&&data.exp>Date.now();}catch{return false;}}
-function cookie(value,seconds){return `oliva_session=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${seconds}${PRODUCTION?'; Secure':''}`;}
 function reserve(type,limit){const day=new Date().toISOString().slice(0,10);db.prepare('INSERT OR IGNORE INTO usage(day) VALUES(?)').run(day);const column=type==='request'?'requests':'upstream';return db.prepare(`UPDATE usage SET ${column}=${column}+1 WHERE day=? AND ${column}<?`).run(day,limit).changes===1;}
-function useLoginLimit(req){const remote=req.socket.remoteAddress||'unknown';const id=createHash('sha256').update(remote).digest('hex');const now=Date.now();for(const[k,v]of loginAttempts)if(v.until<now)loginAttempts.delete(k);const v=loginAttempts.get(id)||{count:0,until:now+15*60*1000};v.count++;loginAttempts.set(id,v);return v.count<=10;}
 async function upstream(messages,trace){
  if(!reserve('upstream',UPSTREAM))throw Object.assign(new Error('Дневной лимит обращений к нейросети исчерпан.'),{status:429});
  const payload={model:MODEL,messages,max_tokens:24000,stream:false};if(process.env.ANYMODEL_JSON_MODE==='json_object')payload.response_format={type:'json_object'};
@@ -49,29 +45,20 @@ const server=http.createServer(async(req,res)=>{
  if(req.method==='POST'){
    if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Запрос разрешён только с адреса приложения.'});
  }
- if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:authenticated(req),configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'0.9.1'});
- if(pathname==='/api/login'&&req.method==='POST'){
-   if(!useLoginLimit(req))return json(res,429,{error:'Слишком много попыток. Подождите 15 минут.'});
-   const data=await body(req,2048);if(typeof data.password!=='string'||data.password.length>256)return json(res,400,{error:'Введите пароль владельца.'});
-   if(!timingSafeEqual(passwordHash,scryptSync(data.password,'oliva-owner-password-v1',32)))return json(res,401,{error:'Пароль не подошёл.'});
-   const value=Buffer.from(JSON.stringify({user:'owner',exp:Date.now()+7*86400000})).toString('base64url');
-   return json(res,200,{ok:true},{'Set-Cookie':cookie(value+'.'+sign(value),7*86400)});
- }
- if(pathname==='/api/logout'&&req.method==='POST')return json(res,200,{ok:true},{'Set-Cookie':cookie('',0)});
+ if(req.method==='POST'&&['/api/analyze','/api/images'].includes(pathname)){const rate=publicLimit(req.socket.remoteAddress);if(!rate.ok)return json(res,429,{error:'Слишком много запросов. Подождите '+rate.retryAfter+' сек. Повтор автоматически не отправлен.'},{'Retry-After':String(rate.retryAfter)});}
+ if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:true,configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'1.0.0'});
+ // Compatibility for installed older clients; no credential is checked or stored.
+ if(['/api/login','/api/logout'].includes(pathname)&&req.method==='POST')return json(res,200,{ok:true});
  if(pathname==='/api/image-options'&&req.method==='GET'){
-   if(!authenticated(req))return json(res,401,{error:'Войдите с паролем владельца.'});
    return json(res,200,await imageService.options());
  }
  if(pathname==='/api/images'&&req.method==='POST'){
-   if(!authenticated(req))return json(res,401,{error:'Войдите с паролем владельца.'});
    const result=await imageService.start(await body(req,200000));return json(res,result.status==='pending'?202:200,result);
  }
  if(pathname.startsWith('/api/images/')&&req.method==='GET'){
-   if(!authenticated(req))return json(res,401,{error:'Войдите с паролем владельца.'});
    const result=await imageService.poll(pathname.slice('/api/images/'.length));return json(res,result.status==='pending'?202:200,result);
  }
  if(pathname==='/api/analyze'&&req.method==='POST'){
-   if(!authenticated(req))return json(res,401,{error:'Войдите с паролем владельца.'});
    if(!API_KEY)return json(res,503,{error:'Ключ AnyModel ещё не задан на сервере. Доступен только учебный пример.'});
    if(inFlight)return json(res,429,{error:'Один запрос уже выполняется. Подождите его завершения.'});
    inFlight=true;trace=traceSelection();trace.mark('upload');
@@ -98,7 +85,7 @@ const server=http.createServer(async(req,res)=>{
          messages.push({role:'user',content:'Исправь формат ответа. Проверка нашла: '+e.message+' По исходным фото верни ТОЛЬКО JSON-объект status ok и массив recipes. '+SELECTION_RULES+' Не сокращай большой подбор до трёх только из-за исправления JSON. Пиши компактно, но сохрани все важные шаги. Укажи meal_type у каждого блюда. У каждого рецепта status ok и warnings:[] при отсутствии предупреждений. Числа не строками. price:null допустимо. Не смешивай единицы базы цены с единицами ингредиента. Если фото небезопасно или не о продуктах, верни соответствующий статус и message.'});
        }
      }
-     trace.mark('success');const recipes=recipe.status==='ok'?recipe.recipes:[];
+     trace.mark('success');const recipes=recipe.status==='ok'?recipe.recipes.map(r=>automaticEstimates(r,data.currency)):[];
      return json(res,200,{status:recipe.status,recipe:recipes[0]||recipe,recipes,currency:data.currency,region:data.region,model:MODEL,cost:recipes.length?calculateCost(recipes[0]):null});
    }finally{inFlight=false;}
  }

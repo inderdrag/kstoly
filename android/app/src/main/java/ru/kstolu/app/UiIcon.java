@@ -1,24 +1,3 @@
 package ru.kstolu.app;
-import android.graphics.*;
-import android.graphics.drawable.Drawable;
-/** Simple native vector icons, no icon font or network resources. */
-final class UiIcon extends Drawable {
-    private final String kind;private final int color,size;private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
-    UiIcon(String kind,int color,int size){this.kind=kind;this.color=color;this.size=size;}
-    private void line(Canvas c,float...xy){Path p=new Path();p.moveTo(xy[0],xy[1]);for(int j=2;j<xy.length;j+=2)p.lineTo(xy[j],xy[j+1]);c.drawPath(p,paint);}
-    @Override public void draw(Canvas c){c.save();c.translate(getBounds().left,getBounds().top);c.scale(getBounds().width()/24f,getBounds().height()/24f);paint.setColor(color);paint.setStrokeWidth(1.7f);paint.setStyle(Paint.Style.STROKE);paint.setStrokeJoin(Paint.Join.ROUND);paint.setStrokeCap(Paint.Cap.ROUND);
-        switch(kind){
-            case "home":line(c,3,10,12,3,21,10,21,21,3,21,3,10);line(c,9,21,9,13,15,13,15,21);break;
-            case "book":line(c,5,3,19,3,19,21,12,17,5,21,5,3);break;
-            case "settings":c.drawCircle(12,12,4,paint);for(int j=0;j<8;j++){double a=j*Math.PI/4;line(c,12+(float)Math.cos(a)*8,12+(float)Math.sin(a)*8,12+(float)Math.cos(a)*10,12+(float)Math.sin(a)*10);}break;
-            case "camera":c.drawRoundRect(3,6,21,21,3,3,paint);line(c,8,6,10,3,14,3,16,6);c.drawCircle(12,13,4,paint);break;
-            case "spark":line(c,12,2,15,9,22,12,15,15,12,22,9,15,2,12,9,9,12,2);break;
-            case "back":line(c,14,5,7,12,14,19);break;
-            case "receipt":line(c,5,3,19,3,19,21,15,19,12,21,8,19,5,21,5,3);line(c,9,8,15,8);line(c,9,12,15,12);break;
-            case "share":c.drawCircle(6,12,3,paint);c.drawCircle(18,5,3,paint);c.drawCircle(18,19,3,paint);line(c,9,10,15,6);line(c,9,14,15,18);break;
-            default:line(c,9,5,16,12,9,19);
-        }c.restore();
-    }
-    @Override public int getIntrinsicWidth(){return size;}@Override public int getIntrinsicHeight(){return size;}
-    @Override public void setAlpha(int alpha){paint.setAlpha(alpha);}@Override public void setColorFilter(ColorFilter filter){paint.setColorFilter(filter);}@Override public int getOpacity(){return PixelFormat.TRANSLUCENT;}
-}
+import android.graphics.*;import android.graphics.drawable.Drawable;
+final class UiIcon extends Drawable {private final String name;private final int color,size;UiIcon(String n,int c,int s){name=n;color=c;size=s;setBounds(0,0,s,s);}public int getIntrinsicWidth(){return size;}public int getIntrinsicHeight(){return size;}public void setAlpha(int a){}public void setColorFilter(ColorFilter f){}public int getOpacity(){return PixelFormat.TRANSLUCENT;}public void draw(Canvas c){c.save();c.translate(getBounds().left,getBounds().top);c.scale(getBounds().width()/24f,getBounds().height()/24f);Paint p=new Paint(3);p.setColor(color);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(1.7f);p.setStrokeCap(Paint.Cap.ROUND);p.setStrokeJoin(Paint.Join.ROUND);Path path=new Path();switch(name){case "home":path.moveTo(3,11);path.lineTo(12,3);path.lineTo(21,11);path.moveTo(5,10);path.lineTo(5,21);path.lineTo(19,21);path.lineTo(19,10);path.moveTo(10,21);path.lineTo(10,14);path.lineTo(14,14);path.lineTo(14,21);break;case "book":path.moveTo(6,3);path.lineTo(18,3);path.lineTo(18,21);path.lineTo(12,17);path.lineTo(6,21);path.close();break;case "camera":c.drawRoundRect(3,6,21,21,3,3,p);c.drawCircle(12,13,4,p);path.moveTo(8,6);path.lineTo(10,3);path.lineTo(14,3);path.lineTo(16,6);break;case "spark":path.moveTo(12,2);path.lineTo(15,9);path.lineTo(22,12);path.lineTo(15,15);path.lineTo(12,22);path.lineTo(9,15);path.lineTo(2,12);path.lineTo(9,9);path.close();break;case "back":path.moveTo(15,5);path.lineTo(8,12);path.lineTo(15,19);break;case "arrow":path.moveTo(9,5);path.lineTo(16,12);path.lineTo(9,19);break;case "settings":c.drawCircle(12,12,4,p);for(int i=0;i<8;i++){double a=i*Math.PI/4;c.drawLine(12+(float)Math.cos(a)*8,12+(float)Math.sin(a)*8,12+(float)Math.cos(a)*10,12+(float)Math.sin(a)*10,p);}break;default:c.drawRoundRect(6,3,18,21,1,1,p);for(int y=7;y<=15;y+=4)c.drawLine(9,y,15,y,p);}c.drawPath(path,p);c.restore();}}

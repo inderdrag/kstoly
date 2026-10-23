@@ -9,4 +9,4 @@ for(const name of Object.keys(assets)){
  mkdirSync(dirname(target),{recursive:true});
  writeFileSync(target,Buffer.from(assets[name],'base64'));
 }
-console.log('Oliva: local image assets ready.');
+console.log('К столу: local image assets ready.');

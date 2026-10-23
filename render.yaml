@@ -14,10 +14,6 @@ services:
         sync: false
       - key: ANYMODEL_MODEL
         value: ag/gemini-2.5-flash
-      - key: APP_PASSWORD
-        generateValue: true
-      - key: SESSION_SECRET
-        generateValue: true
       - key: DAILY_REQUEST_LIMIT
         value: "20"
       - key: DAILY_UPSTREAM_LIMIT
@@ -26,3 +22,5 @@ services:
         value: ./var
       - key: ANYMODEL_JSON_MODE
         value: "off"
+      - key: PUBLIC_BURST_LIMIT
+        value: "3"

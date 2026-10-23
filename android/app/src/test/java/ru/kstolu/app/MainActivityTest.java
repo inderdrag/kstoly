@@ -1,47 +1,19 @@
 package ru.kstolu.app;
-import org.junit.*;
-import org.junit.runner.RunWith;
-import org.robolectric.*;
-import org.robolectric.annotation.Config;
-import org.robolectric.annotation.GraphicsMode;
-import android.view.*;
-import android.widget.*;
-import android.graphics.*;
-import java.io.*;
-import java.lang.reflect.*;
-import org.json.*;
-import static org.junit.Assert.*;
-
-@RunWith(RobolectricTestRunner.class)
-@Config(sdk=35,qualifiers="w390dp-h844dp-mdpi")
-@GraphicsMode(GraphicsMode.Mode.NATIVE)
+import org.junit.*;import org.junit.runner.RunWith;import org.robolectric.*;import org.robolectric.annotation.*;import android.view.*;import android.widget.*;import android.graphics.*;import android.os.*;import java.io.*;import java.lang.reflect.*;import java.time.Duration;import org.json.*;import static org.junit.Assert.*;
+@RunWith(RobolectricTestRunner.class) @Config(sdk=35,qualifiers="w390dp-h844dp-mdpi") @GraphicsMode(GraphicsMode.Mode.NATIVE)
 public class MainActivityTest {
-    private org.robolectric.android.controller.ActivityController<MainActivity> controller;
-    private MainActivity activity;
-    @Before public void setup()throws Exception{controller=Robolectric.buildActivity(MainActivity.class).setup();activity=controller.get();}
-    @After public void close(){controller.pause().stop().destroy();}
-    private TextView find(View root,String text){if(root instanceof TextView&&((TextView)root).getText().toString().equals(text))return (TextView)root;if(root instanceof ViewGroup){ViewGroup g=(ViewGroup)root;for(int i=0;i<g.getChildCount();i++){TextView found=find(g.getChildAt(i),text);if(found!=null)return found;}}return null;}
-    private void click(String label){TextView view=find(activity.getWindow().getDecorView(),label);assertNotNull(label,view);view.performClick();}
-    private void render(String name)throws Exception{renderView(activity.getWindow().getDecorView(),name);}
-    private void renderView(View root,String name)throws Exception{root.measure(View.MeasureSpec.makeMeasureSpec(390,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(844,View.MeasureSpec.EXACTLY));root.layout(0,0,390,844);
-        Bitmap bitmap=Bitmap.createBitmap(390,844,Bitmap.Config.ARGB_8888);root.draw(new Canvas(bitmap));File dir=new File("build/visual-qa");dir.mkdirs();try(FileOutputStream out=new FileOutputStream(new File(dir,name+".png"))){assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,out));}bitmap.recycle();
-    }
-    private void renderDialog(android.app.AlertDialog dialog,String name)throws Exception{View root=dialog.getWindow().getDecorView();root.measure(View.MeasureSpec.makeMeasureSpec(358,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(650,View.MeasureSpec.AT_MOST));root.layout(0,0,358,root.getMeasuredHeight());Bitmap bitmap=Bitmap.createBitmap(390,844,Bitmap.Config.ARGB_8888);Canvas canvas=new Canvas(bitmap);activity.getWindow().getDecorView().draw(canvas);canvas.drawColor(0x55000000);canvas.translate(16,(844-root.getMeasuredHeight())/2f);root.draw(canvas);File dir=new File("build/visual-qa");dir.mkdirs();try(FileOutputStream out=new FileOutputStream(new File(dir,name+".png"))){bitmap.compress(Bitmap.CompressFormat.PNG,100,out);}bitmap.recycle();}
-    @Test public void nativeHomeSettingsHistoryScreens()throws Exception{
-        Method home=MainActivity.class.getDeclaredMethod("home");home.setAccessible(true);home.invoke(activity);
-        assertNotNull(find(activity.getWindow().getDecorView(),"К столу"));render("01-home");click("Настройки");assertNotNull(find(activity.getWindow().getDecorView(),"Сохранить настройки"));render("02-settings");click("Сохранённое");render("03-empty-history");assertNotNull(find(activity.getWindow().getDecorView(),"Здесь появятся сохранённые рецепты."));
-    }
-    @Test public void nativeLoginScreenDoesNotStorePassword()throws Exception{
-        assertNull(find(activity.getWindow().getDecorView(),"Подобрать блюда"));assertNotNull(find(activity.getWindow().getDecorView(),"Войти"));
-        assertNull(find(activity.getWindow().getDecorView(),"Подобрать блюда"));render("05-login");
-    }
-    @Test public void recipeKeepsUnknownPricesAndDoesNotGenerateAutomatically()throws Exception{
-        String json="{\"recipe\":{\"status\":\"ok\",\"title\":\"Бутерброды с авокадо\",\"description\":\"Хлеб с творожным сыром и ломтиками авокадо.\",\"servings\":2,\"prep_minutes\":10,\"cook_minutes\":0,\"ingredients\":[{\"name\":\"Хлеб\",\"amount\":2,\"unit\":\"piece\",\"price\":null},{\"name\":\"Авокадо\",\"amount\":1,\"unit\":\"piece\",\"price\":null}],\"steps\":[{\"title\":\"Соберите\",\"body\":\"Намажьте хлеб сыром, сверху выложите ломтики авокадо.\"}],\"warnings\":[]},\"currency\":\"RUB\",\"id\":\"test\"}";
-        JSONObject snapshot=new JSONObject(json);Method open=MainActivity.class.getDeclaredMethod("openRecipe",JSONObject.class,String.class);open.setAccessible(true);open.invoke(activity,snapshot,"history");render("04-recipe");
-        assertNotNull(find(activity.getWindow().getDecorView(),"Сгенерировать фото"));Method cost=MainActivity.class.getDeclaredMethod("cost",JSONObject.class,int.class,String.class);cost.setAccessible(true);assertEquals("Цена неизвестна",cost.invoke(activity,snapshot.getJSONObject("recipe"),2,"RUB"));
-        JSONArray items=new JSONArray().put(snapshot);Field choices=MainActivity.class.getDeclaredField("choices");choices.setAccessible(true);choices.set(activity,items);Method choose=MainActivity.class.getDeclaredMethod("showChoices");choose.setAccessible(true);choose.invoke(activity);render("06-choices");open.invoke(activity,snapshot,"history");
-        click("Сохранить рецепт");click("Сохранённое");assertNotNull(find(activity.getWindow().getDecorView(),"Бутерброды с авокадо"));render("03-history");
-        Bitmap sample=Bitmap.createBitmap(64,64,Bitmap.Config.ARGB_8888);sample.eraseColor(0xffeeeeee);ByteArrayOutputStream bytes=new ByteArrayOutputStream();sample.compress(Bitmap.CompressFormat.JPEG,85,bytes);sample.recycle();
-        Method preview=MainActivity.class.getDeclaredMethod("preview",JSONObject.class,byte[].class);preview.setAccessible(true);preview.invoke(activity,snapshot,bytes.toByteArray());android.app.AlertDialog dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();assertNotNull(dialog);renderDialog(dialog,"07-photo-preview");dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).performClick();org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();assertNotNull(find(activity.getWindow().getDecorView(),"Фото отклонено. Новая генерация не запускалась."));
-    }
+ private org.robolectric.android.controller.ActivityController<MainActivity> controller;private MainActivity activity;
+ @Before public void setup(){ApiClient.configureForTests((url)->{throw new AssertionError("No network allowed: "+url);});controller=Robolectric.buildActivity(MainActivity.class).setup();activity=controller.get();}
+ @After public void close(){controller.pause().stop().destroy();ApiClient.restoreTransport();}
+ private TextView find(View v,String s){if(v instanceof TextView&&((TextView)v).getText().toString().equals(s))return (TextView)v;if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++){TextView t=find(g.getChildAt(i),s);if(t!=null)return t;}}return null;}
+ private View root(){return activity.getWindow().getDecorView();}private void click(String s){TextView t=find(root(),s);assertNotNull(s,t);t.performClick();}
+ private Object invoke(String name,Class<?>[]types,Object...args)throws Exception{Method m=MainActivity.class.getDeclaredMethod(name,types);m.setAccessible(true);return m.invoke(activity,args);}
+ private JSONObject item()throws Exception{return new JSONObject("{\"currency\":\"RUB\",\"portions\":2,\"recipe\":{\"status\":\"ok\",\"title\":\"Тосты с авокадо\",\"description\":\"Хрустящий хлеб, нежный сыр и спелый авокадо.\",\"servings\":2,\"prep_minutes\":5,\"cook_minutes\":2,\"nutrition\":{\"source\":\"estimate\",\"kcal_per_100g\":220},\"ingredients\":[{\"name\":\"Хлеб цельнозерновой\",\"amount\":80,\"unit\":\"g\",\"price\":{\"source\":\"estimate\",\"quantity\":1000,\"unit\":\"g\",\"currency\":\"RUB\",\"low\":90,\"high\":260,\"note\":\"Приблизительно\"}},{\"name\":\"Авокадо\",\"amount\":1,\"unit\":\"piece\",\"price\":null}],\"steps\":[{\"title\":\"Подготовьте продукты\",\"body\":\"Вымойте авокадо. Разрежьте вдоль, удалите косточку ложкой и нарежьте мякоть ломтиками.\"},{\"title\":\"Подрумяньте хлеб\",\"body\":\"Разогрейте сухую сковороду на среднем огне. Выложите хлеб в один слой и подрумяньте с обеих сторон.\",\"timer_seconds\":120,\"timer_hint\":\"Запустите, когда выложите хлеб на разогретую сковороду.\"},{\"title\":\"Соберите тосты\",\"body\":\"Намажьте хлеб сыром и выложите авокадо. Подавайте сразу.\"}],\"warnings\":[]}} ");}
+ private InlineCooking open()throws Exception{invoke("openRecipe",new Class[]{JSONObject.class,String.class},item(),"choices");Field f=MainActivity.class.getDeclaredField("inlineCooking");f.setAccessible(true);return (InlineCooking)f.get(activity);}
+ private void draw(View v,String name,int w,int h)throws Exception{v.measure(View.MeasureSpec.makeMeasureSpec(w,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(h,View.MeasureSpec.EXACTLY));v.layout(0,0,w,h);Bitmap b=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);v.draw(new Canvas(b));File dir=new File("build/visual-qa-1.0");dir.mkdirs();try(FileOutputStream out=new FileOutputStream(new File(dir,name+".png"))){b.compress(Bitmap.CompressFormat.PNG,100,out);}b.recycle();}
+ @Test public void immediateHomeNoLogin()throws Exception{assertNotNull(find(root(),"Подобрать блюда"));assertNull(find(root(),"Войти"));draw(root(),"home",390,844);invoke("settings",new Class[]{});assertNull(find(root(),"Выйти"));draw(root(),"settings",390,844);invoke("showHistory",new Class[]{});draw(root(),"library-empty",390,844);}
+ @Test public void inlineStepsDoNotOpenAnotherActivity()throws Exception{InlineCooking c=open();assertNotNull(c);assertNotNull(find(root(),"Подготовьте продукты"));assertNull(find(root(),"Указать цену"));assertNull(find(root(),"1. Подготовьте продукты"));draw(root(),"recipe",390,844);draw(c,"step-preparation",342,520);click("Далее ›");Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(350));assertNotNull(find(root(),"Подрумяньте хлеб"));assertNull(Shadows.shadowOf(activity).getNextStartedActivity());draw(c,"step-timer",342,620);click("Далее ›");Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(350));click("Готово ✓");Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(350));assertNotNull(find(root(),"Вы приготовили блюдо!"));draw(c,"completed",342,420);}
+ @Test public void unknownLegacyCaloriesAreNotRelabelled()throws Exception{JSONObject r=item().getJSONObject("recipe");assertEquals(220,Calories.value(r));r.put("nutrition",new JSONObject().put("source","estimate").put("kcal_per_serving",320));assertEquals(-1,Calories.value(r));}
+ @Test public void inlineTimerAutoAdvancesOnceAndRestores()throws Exception{InlineCooking c=open();c.move(1);Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(350));TextView play=find(c,"▷");assertNotNull(play);play.performClick();Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(121));assertNotNull(find(c,"Соберите тосты"));Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3));assertNotNull(find(c,"Соберите тосты"));c.suspendTimer();InlineCooking restored=new InlineCooking(activity,item());assertNotNull(find(restored,"Соберите тосты"));restored.suspendTimer();}
+ @Test public void landscapeHasInlineCookingAndScroll()throws Exception{open();draw(root(),"recipe-landscape",844,390);}
 }

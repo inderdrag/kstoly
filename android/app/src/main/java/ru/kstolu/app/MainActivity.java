@@ -25,48 +25,49 @@ public class MainActivity extends Activity {
     private final Handler ui=new Handler(Looper.getMainLooper());
     private LinearLayout shell,body,nav; private TextView notice;
     private android.content.SharedPreferences prefs;
-    private boolean authenticated=false,busy=false,receiptTarget=false;
+    private boolean busy=false,receiptTarget=false;
     private final ArrayList<byte[]> productPhotos=new ArrayList<>();
     private byte[] productPhoto,receiptPhoto; private Uri cameraUri;
     private JSONArray choices=new JSONArray(),history=new JSONArray();
     private JSONObject selected; private String page="home",returnPage="choices"; private int portions=2;
     private String catalogCategory="all",catalogSort="recommended",libraryQuery="",libraryFolder="Все";
-    private Button imageAction;
-    private static final int BG=0xfff9faf6,INK=0xff253127,OLIVE=0xff4c6441,MUTED=0xff626d61,BORDER=0xffdde3d7,SOFT=0xffeaf0e4;
+    private Button imageAction; private InlineCooking inlineCooking;
+    private static final int BG=0xfff7f9f3,INK=0xff253127,OLIVE=0xff4c6441,MUTED=0xff626d61,BORDER=0xffe0e6d9,SOFT=0xffeaf0e4;
     interface Task { Object run() throws Exception; }
     interface Done { void accept(Object value) throws Exception; }
 
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);prefs=getSharedPreferences("settings",MODE_PRIVATE);ApiClient.initialize(this);readHistory();loadInputs();
+        super.onCreate(state);prefs=getSharedPreferences("settings",MODE_PRIVATE);readHistory();loadInputs();
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(getWindow(),false);
         getWindow().setStatusBarColor(Color.TRANSPARENT);getWindow().setNavigationBarColor(Color.TRANSPARENT);
         androidx.core.view.WindowInsetsControllerCompat bars=new androidx.core.view.WindowInsetsControllerCompat(getWindow(),getWindow().getDecorView());bars.setAppearanceLightStatusBars(true);bars.setAppearanceLightNavigationBars(true);
         if(state!=null){String uri=state.getString("cameraUri");if(uri!=null)cameraUri=Uri.parse(uri);receiptTarget=state.getBoolean("receiptTarget");}
-        restoreAccess();
+        home();
     }
     @Override public void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);if(cameraUri!=null)out.putString("cameraUri",cameraUri.toString());out.putBoolean("receiptTarget",receiptTarget);}
-    @Override protected void onResume(){super.onResume();readHistory();if(page.equals("history"))showHistory();else if(page.equals("detail")&&!busy)detail();}
-    @Override protected void onDestroy(){worker.shutdownNow();super.onDestroy();}
-    @Override public void onBackPressed(){if(busy){toast("Дождитесь завершения запроса. Повтор не запускается.");return;}if(page.equals("login")||page.equals("session")){super.onBackPressed();return;}if(page.equals("detail")){if(returnPage.equals("history"))showHistory();else showChoices();}else if(!page.equals("home"))home();else super.onBackPressed();}
+    @Override protected void onResume(){super.onResume();readHistory();if(inlineCooking!=null)inlineCooking.resumeTimer();}
+    @Override protected void onPause(){if(inlineCooking!=null)inlineCooking.suspendTimer();super.onPause();}
+    @Override protected void onDestroy(){if(inlineCooking!=null)inlineCooking.suspendTimer();worker.shutdownNow();super.onDestroy();}
+    @Override public void onBackPressed(){if(busy){toast("Дождитесь завершения запроса. Повтор не запускается.");return;}if(page.equals("detail")){if(returnPage.equals("history"))showHistory();else showChoices();}else if(!page.equals("home"))home();else super.onBackPressed();}
     private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
-    private GradientDrawable background(int fill){GradientDrawable d=new GradientDrawable();d.setColor(fill);d.setCornerRadius(dp(14));d.setStroke(dp(1),BORDER);return d;}
+    private GradientDrawable background(int fill){GradientDrawable d=new GradientDrawable();d.setColor(fill);d.setCornerRadius(dp(20));d.setStroke(dp(1),BORDER);return d;}
     private void screen(String name,String heading){
-        page=name;shell=new LinearLayout(this);shell.setOrientation(LinearLayout.VERTICAL);shell.setBackgroundColor(BG);
+        if(inlineCooking!=null){inlineCooking.suspendTimer();inlineCooking=null;}page=name;shell=new LinearLayout(this);shell.setOrientation(LinearLayout.VERTICAL);shell.setBackgroundColor(BG);
         androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(shell,(v,insets)->{androidx.core.graphics.Insets bars=insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars()|androidx.core.view.WindowInsetsCompat.Type.displayCutout());androidx.core.graphics.Insets ime=insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime());v.setPadding(bars.left,bars.top,bars.right,Math.max(bars.bottom,ime.bottom));return insets;});
-        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setClipToPadding(false);body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(20),dp(16),dp(20),dp(24));scroll.addView(body);shell.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setClipToPadding(false);body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(24),dp(20),dp(24),dp(32));scroll.addView(body);shell.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         notice=text(busy?"Запрос выполняется…":"",14);notice.setTextColor(OLIVE);notice.setPadding(dp(12),dp(10),dp(12),dp(10));notice.setBackground(background(SOFT));notice.setVisibility(busy?View.VISIBLE:View.GONE);notice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);body.addView(notice);
         if(!heading.isEmpty())title(heading);
         nav=new LinearLayout(this);nav.setBackgroundColor(Color.WHITE);nav.setPadding(dp(8),dp(8),dp(8),dp(8));
         for(String[] tab:new String[][]{{"Главная","home","home"},{"Сохранённое","history","book"},{"Настройки","settings","settings"}}){boolean active=name.equals(tab[1])||(tab[1].equals("home")&&(name.equals("choices")||(name.equals("detail")&&!returnPage.equals("history"))))||(tab[1].equals("history")&&name.equals("detail")&&returnPage.equals("history"));
-            LinearLayout item=new LinearLayout(this);item.setOrientation(LinearLayout.VERTICAL);item.setGravity(Gravity.CENTER);item.setBackground(background(active?SOFT:Color.WHITE));item.setContentDescription(tab[0]);item.setFocusable(true);
+            LinearLayout item=new LinearLayout(this);item.setOrientation(LinearLayout.VERTICAL);item.setGravity(Gravity.CENTER);item.setBackground(background(active?SOFT:Color.TRANSPARENT));item.setContentDescription(tab[0]);item.setFocusable(true);
             ImageView icon=new ImageView(this);icon.setImageDrawable(new UiIcon(tab[2],active?OLIVE:MUTED,dp(22)));item.addView(icon,new LinearLayout.LayoutParams(dp(22),dp(22)));
             TextView label=text(tab[0],12);label.setTextColor(active?OLIVE:MUTED);label.setGravity(Gravity.CENTER);label.setPadding(0,dp(4),0,0);if(active)label.setTypeface(null,Typeface.BOLD);item.addView(label);label.setOnClickListener(v->item.performClick());
             item.setOnClickListener(v->{if(busy){toast("Сначала дождитесь завершения запроса.");return;}switch(tab[1]){case "history":showHistory();break;case "settings":settings();break;default:home();}});nav.addView(item,new LinearLayout.LayoutParams(0,dp(56),1));}
         shell.addView(nav);setContentView(shell);androidx.core.view.ViewCompat.requestApplyInsets(shell);
     }
     private TextView text(String value,int size){TextView v=new TextView(this);v.setText(value);v.setTextSize(size);v.setTextColor(INK);v.setLineSpacing(dp(3),1);v.setPadding(0,dp(3),0,dp(5));return v;}
-    private void title(String value){TextView v=text(value,27);v.setTypeface(Typeface.create("sans-serif",Typeface.BOLD));v.setPadding(0,dp(4),0,dp(10));body.addView(v);}
+    private void title(String value){TextView v=text(value,29);v.setTypeface(Typeface.create("sans-serif",Typeface.BOLD));v.setPadding(0,dp(4),0,dp(10));body.addView(v);}
     private void section(String value){TextView v=text(value,19);v.setTypeface(null,Typeface.BOLD);v.setPadding(0,dp(12),0,dp(6));body.addView(v);}
     private void paragraph(String value){body.addView(text(value,16));}
     private void muted(String value){TextView v=text(value,14);v.setTextColor(MUTED);body.addView(v);}
@@ -86,7 +87,7 @@ public class MainActivity extends Activity {
         if(busy){toast("Запрос уже выполняется.");return;}busy=true;message("Запрос выполняется. Не отправляйте его повторно.");
         worker.execute(()->{Object value=null;Exception error=null;try{value=work.run();}catch(Exception e){error=e;}final Object result=value;final Exception failure=error;
             ui.post(()->{if(isFinishing()||isDestroyed())return;busy=false;if(imageAction!=null){imageAction.setEnabled(true);imageAction.setText(photoButtonLabel());}if(failure!=null){
-                if(failure instanceof ApiClient.ApiError){ApiClient.ApiError e=(ApiClient.ApiError)failure;if(e.status==401){authenticated=false;ApiClient.clearSession();loginPage("Войдите снова: срок входа истёк или сервер обновил сессию.");}if(e.failedJob)prefs.edit().remove("pendingImage").apply();}
+                if(failure instanceof ApiClient.ApiError){ApiClient.ApiError e=(ApiClient.ApiError)failure;if(e.failedJob)prefs.edit().remove("pendingImage").apply();}
                 message(failure.getMessage()==null?"Ошибка. Повтор автоматически не отправлен.":failure.getMessage());
             }else try{done.accept(result);}catch(Exception e){message("Не удалось сохранить результат: "+e.getMessage());}});
         });
@@ -99,47 +100,14 @@ public class MainActivity extends Activity {
         link(receiptPhoto==null?"Добавить чек · необязательно":"Заменить фото чека","receipt",()->photoMenu(true));
         if(receiptPhoto!=null)link("Убрать чек","back",()->{receiptPhoto=null;persistInputs();home();});
         quickPreferences();
-        if(getSharedPreferences("cooking",0).contains("item"))link("Продолжить готовку","arrow",()->startActivity(new Intent(this,CookingActivity.class)));
-        button("Подобрать блюда",()->{if(busy)return;if(productPhoto==null){toast("Сначала добавьте фото продуктов.");return;}if(!authenticated){login();return;}
+        if(getSharedPreferences("cooking",0).contains("item"))link("Продолжить готовку","arrow",()->{try{openRecipe(new JSONObject(getSharedPreferences("cooking",0).getString("item","{}")),"history");}catch(Exception e){message("Откройте рецепт из сохранённого.");}});
+        button("Подобрать блюда",()->{if(busy)return;if(productPhoto==null){toast("Сначала добавьте фото продуктов.");return;}
             confirm("Передача фотографий","Фото продуктов и, если добавлен, чек будут переданы в AnyModel и поставщику модели. Подбор использует настроенный на сервере тариф. Цены и ккал — приблизительные оценки.",()->analyze());});
         if(choices.length()>0){section("Последний подбор");JSONObject recent=choices.optJSONObject(0);if(recent!=null)recipeCard(recent,"choices");link("Все подобранные блюда","arrow",()->{if(!busy)showChoices();});}
         else if(history.length()>0){section("Недавно сохранено");JSONObject recent=history.optJSONObject(0);if(recent!=null)recipeCard(recent,"history");}
         else card(()->{TextView intro=text("Три шага до готового блюда",17);intro.setTypeface(null,Typeface.BOLD);body.addView(intro);muted("1. Добавьте фото продуктов\n2. Выберите рецепт\n3. Готовьте по шагам");});
         if(productPhoto!=null)link("Убрать выбранные фотографии","back",()->{productPhotos.clear();productPhoto=null;receiptPhoto=null;persistInputs();home();});
         space();muted("Фото отправляется только с вашего согласия. Для подбора нужен интернет. После простоя сервер может запускаться около минуты.");
-    }
-    private void restoreAccess(){
-        authenticated=false;
-        if(!ApiClient.hasSession()){loginPage("");return;}
-        screen("session","Проверяем вход");nav.setVisibility(View.GONE);
-        paragraph("Вход сохранён на этом устройстве. Подключаемся к серверу — пароль повторно вводить не нужно.");
-        button("Повторить проверку",()->{if(!busy)restoreAccess();});
-        button("Открыть сохранённые рецепты без интернета",()->{if(!busy)showHistory();});
-        task(()->ApiClient.call("/api/status",null),result->{
-            if(((JSONObject)result).optBoolean("authenticated")){authenticated=true;home();}
-            else{ApiClient.clearSession();loginPage("Срок входа истёк. Введите пароль снова.");}
-        });
-    }
-    private void login(){if(!busy)loginPage("");}
-    private void loginPage(String reason){
-        authenticated=false;screen("login","Добро пожаловать\nв «К столу»");nav.setVisibility(View.GONE);
-        paragraph("Войдите один раз — приложение запомнит вход на этом телефоне.");
-        if(!reason.isEmpty())paragraph(reason);
-        EditText password=field("Пароль приложения","");
-        password.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);password.setSaveEnabled(false);
-        password.setAutofillHints(View.AUTOFILL_HINT_PASSWORD);
-        button("Войти",()->{
-            if(busy)return;String value=password.getText().toString();if(value.isEmpty()){message("Введите пароль приложения.");return;}
-            password.setText("");
-            task(()->{
-                ApiClient.call("/api/login",new JSONObject().put("password",value));
-                if(!ApiClient.hasSession())throw new java.io.IOException("Не удалось сохранить вход. Сервер не вернул сессию.");
-                JSONObject status=ApiClient.call("/api/status",null);
-                if(!status.optBoolean("authenticated")){ApiClient.clearSession();throw new java.io.IOException("Сервер не подтвердил вход. Подбор не запускался.");}
-                return status;
-            },result->{authenticated=true;home();message("Вы вошли. Теперь можно подобрать блюда.");});
-        });
-        space();paragraph("Нужен отдельный APP_PASSWORD из Render — не ключ AnyModel и не пароль GitHub. Сам пароль не сохраняется. Защищённая сессия действует до 7 дней, до выхода или изменения настроек сессии на сервере.");
     }
     private void photoMenu(boolean receipt){
         if(busy)return;if(!receipt&&productPhotos.size()>=4){toast("Можно добавить до четырёх фото. Уберите лишний снимок в ленте.");return;}receiptTarget=receipt;
@@ -194,16 +162,17 @@ public class MainActivity extends Activity {
         eyebrow("Рецепт из ваших продуктов");title(recipe.optString("title"));muted(recipe.optString("description"));
         try{File file=imageFile(recipe);if(file.isFile()){space();showPhoto(readFile(file,3*1024*1024),220);muted("Изображение ИИ · принято вами");}}catch(Exception e){muted("Сохранённое фото не удалось открыть.");}
         card(()->{LinearLayout stats=new LinearLayout(this);String kcal=Calories.shortValue(recipe);String price=cost(recipe,1,selected.optString("currency","RUB"));
-            for(String[] stat:new String[][]{{String.valueOf(recipe.optInt("prep_minutes")+recipe.optInt("cook_minutes"))+" мин","время"},{kcal,"ккал / порция"},{price.equals("Цена неизвестна")?"Нет цены":compactPrice(price),"цена / порция"}}){LinearLayout cell=new LinearLayout(this);cell.setOrientation(LinearLayout.VERTICAL);cell.setGravity(Gravity.CENTER);TextView v=text(stat[0],16);v.setGravity(Gravity.CENTER);v.setTypeface(null,Typeface.BOLD);cell.addView(v);TextView caption=text(stat[1],12);caption.setTextColor(MUTED);caption.setGravity(Gravity.CENTER);cell.addView(caption);stats.addView(cell,new LinearLayout.LayoutParams(0,-2,1));}body.addView(stats);
+            for(String[] stat:new String[][]{{String.valueOf(recipe.optInt("prep_minutes")+recipe.optInt("cook_minutes"))+" мин","время"},{kcal,"ккал / 100 г"},{price.equals("Цена неизвестна")?"Нет цены":compactPrice(price),"цена / порция"}}){LinearLayout cell=new LinearLayout(this);cell.setOrientation(LinearLayout.VERTICAL);cell.setGravity(Gravity.CENTER);TextView v=text(stat[0],16);v.setGravity(Gravity.CENTER);v.setTypeface(null,Typeface.BOLD);cell.addView(v);TextView caption=text(stat[1],12);caption.setTextColor(MUTED);caption.setGravity(Gravity.CENTER);cell.addView(caption);stats.addView(cell,new LinearLayout.LayoutParams(0,-2,1));}body.addView(stats);
         });
         LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);TextView servings=text("Порции",16);servings.setTypeface(null,Typeface.BOLD);row.addView(servings,new LinearLayout.LayoutParams(0,-2,1));Button minus=buttonView("−",()->{if(!busy&&portions>1){portions--;detail();}}),plus=buttonView("+",()->{if(!busy&&portions<8){portions++;detail();}});minus.setContentDescription("Уменьшить порции");plus.setContentDescription("Увеличить порции");row.addView(minus,new LinearLayout.LayoutParams(dp(48),dp(48)));TextView count=text(String.valueOf(portions),17);count.setGravity(Gravity.CENTER);row.addView(count,new LinearLayout.LayoutParams(dp(44),dp(48)));row.addView(plus,new LinearLayout.LayoutParams(dp(48),dp(48)));body.addView(row);
         card(()->{TextView name=text("Фото вашего блюда",17);name.setTypeface(null,Typeface.BOLD);name.setCompoundDrawablesWithIntrinsicBounds(new UiIcon("spark",OLIVE,dp(20)),null,null,null);name.setCompoundDrawablePadding(dp(8));body.addView(name);muted("Создаётся только по нажатию. Перед сохранением покажем результат.");imageAction=buttonView(photoButtonLabel(),()->requestPhoto());body.addView(imageAction,new LinearLayout.LayoutParams(-1,-2));});
-        section("Ингредиенты");muted("Цена — за указанное количество. Нажмите её, чтобы задать свою. «+ ?» означает, что известна только часть суммы.");JSONArray ingredients=recipe.optJSONArray("ingredients");double factor=(double)portions/recipe.optInt("servings",2);for(int i=0;i<ingredients.length();i++){JSONObject x=ingredients.optJSONObject(i);String unit=x.optString("unit");ingredientRow(x,factor,selected.optString("currency","RUB"));}
+        section("Ингредиенты");muted("Цены рассчитаны автоматически. Это ориентир, а не проверенный прайс магазина.");JSONArray ingredients=recipe.optJSONArray("ingredients");double factor=(double)portions/recipe.optInt("servings",2);for(int i=0;i<ingredients.length();i++){JSONObject x=ingredients.optJSONObject(i);String unit=x.optString("unit");ingredientRow(x,factor,selected.optString("currency","RUB"));}
         button("Сохранить рецепт",()->{try{saveSelected();toast("Рецепт сохранён на устройстве.");}catch(Exception e){message("Не удалось сохранить рецепт.");}});
         link("Папки рецепта","book",()->folderPicker(recipe));
         int rating=Library.rating(this,recipe);if(rating>0)muted("Ваша оценка: "+rating+" / 5");
         muted(Calories.note(recipe));
-        section("Готовим по шагам");button("Готовить пошагово  ›",this::openCooking);muted("Листайте шаги, запускайте таймер в нужный момент. В конце — ваша оценка блюда.");JSONArray steps=recipe.optJSONArray("steps");for(int i=0;i<steps.length();i++){JSONObject step=steps.optJSONObject(i);final int number=i+1;card(()->{CheckBox heading=new CheckBox(this);heading.setText(number+". "+step.optString("title"));heading.setTextColor(INK);heading.setTextSize(17);heading.setTypeface(null,Typeface.BOLD);body.addView(heading);paragraph(step.optString("body"));});}
+        section("Готовим по шагам");
+        try{selected.put("portions",portions);inlineCooking=new InlineCooking(this,selected);body.addView(inlineCooking,new LinearLayout.LayoutParams(-1,-2));}catch(Exception e){muted("Не удалось показать шаги. Откройте рецепт ещё раз.");}
         JSONArray warnings=recipe.optJSONArray("warnings");if(warnings!=null&&warnings.length()>0){section("Обратите внимание");for(int i=0;i<warnings.length();i++)muted("• "+warnings.optString(i));}link("Поделиться рецептом","share",()->share(recipe));
         try{if(imageFile(recipe).exists())link("Создать другое фото","spark",()->confirm("Заменить фото?","Сохранённое фото останется до принятия нового. Далее потребуется подтверждение новой попытки.",()->generate(false)));if(imageFile(recipe).exists())link("Удалить фото этого блюда","back",()->confirm("Удалить фото?","Рецепт останется. Новая генерация автоматически не запускается.",()->{try{if(!imageFile(recipe).delete())throw new IOException();detail();}catch(Exception e){message("Не удалось удалить фото.");}}));}catch(Exception ignored){}
     }
@@ -213,13 +182,13 @@ public class MainActivity extends Activity {
     }
     private JSONObject pendingPhoto()throws Exception{return prefs.contains("pendingImage")?new JSONObject(prefs.getString("pendingImage","{}")):null;}
     private File draftFile(){return new File(getFilesDir(),"pending-image.jpg");}
-    private void requestPhoto(){if(busy)return;try{JSONObject pending=pendingPhoto();if(pending!=null&&pending.optString("phase").equals("ready")){preview(pending.getJSONObject("snapshot"),readFile(draftFile(),3*1024*1024));return;}if(pending==null&&selected!=null&&imageFile(selected.getJSONObject("recipe")).isFile()){previewSaved();return;}}catch(Exception e){message("Не удалось открыть результат. Прежнее задание сохранено; новая попытка не запущена.");return;}if(!authenticated){login();return;}if(!prefs.getBoolean("generation",false)){
+    private void requestPhoto(){if(busy)return;try{JSONObject pending=pendingPhoto();if(pending!=null&&pending.optString("phase").equals("ready")){preview(pending.getJSONObject("snapshot"),readFile(draftFile(),3*1024*1024));return;}if(pending==null&&selected!=null&&imageFile(selected.getJSONObject("recipe")).isFile()){previewSaved();return;}}catch(Exception e){message("Не удалось открыть результат. Прежнее задание сохранено; новая попытка не запущена.");return;}if(!prefs.getBoolean("generation",false)){
         confirm("Включить генерацию фото?","Фото создаётся только после отдельного подтверждения. Используются тариф и квоты сервера; бесплатность не гарантируется.",()->{prefs.edit().putBoolean("generation",true).apply();detail();generate(false);});
     }else generate(false);}
     private void previewSaved(){try{ImageView image=new ImageView(this);image.setImageBitmap(BitmapFactory.decodeFile(imageFile(selected.getJSONObject("recipe")).getPath()));image.setScaleType(ImageView.ScaleType.FIT_CENTER);image.setContentDescription("Сохранённое фото блюда");AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Фото сохранено").setView(image).setPositiveButton("Закрыть",null).create();dialog.setOnShowListener(d->{fitDialog(dialog);image.setMinimumHeight(dp(240));});dialog.show();}catch(Exception e){message("Не удалось открыть сохранённое фото.");}}
     private static String amount(double v){return Math.abs(v-Math.rint(v))<.001?String.valueOf(Math.round(v)):String.format(Locale.getDefault(),"%.1f",v);}
     private String cost(JSONObject recipe,int servings,String currency){
-        double lo=0,hi=0;int missing=0;JSONArray list=recipe.optJSONArray("ingredients");for(int i=0;i<list.length();i++){JSONObject x=list.optJSONObject(i),price=PriceBook.price(this,x,currency);if(price==null||price.optDouble("quantity",0)<=0){missing++;continue;}double ratio=x.optDouble("amount")/price.optDouble("quantity")*servings/recipe.optInt("servings",2);lo+=price.optDouble("low")*ratio;hi+=price.optDouble("high")*ratio;}
+        double lo=0,hi=0;int missing=0;JSONArray list=recipe.optJSONArray("ingredients");for(int i=0;i<list.length();i++){JSONObject x=list.optJSONObject(i),price=x.optJSONObject("price");if(price==null||price.optDouble("quantity",0)<=0){missing++;continue;}double ratio=x.optDouble("amount")/price.optDouble("quantity")*servings/recipe.optInt("servings",2);lo+=price.optDouble("low")*ratio;hi+=price.optDouble("high")*ratio;}
         if(missing==list.length())return "Цена неизвестна";String value=Math.round(lo)==Math.round(hi)?String.format(Locale.getDefault(),"≈ %.0f %s",lo,currency):String.format(Locale.getDefault(),"≈ %.0f–%.0f %s",lo,hi,currency);return value+(missing>0?" + неизвестные цены":"");
     }
     private String compactPrice(String value){return value.replace(" + неизвестные цены"," + ?").replace("RUB","₽").replace("KZT","₸").replace("EUR","€").replace("USD","$");}
@@ -245,13 +214,12 @@ public class MainActivity extends Activity {
         final Switch[] generation=new Switch[1];card(()->{generation[0]=new Switch(this);generation[0].setText("Разрешить генерацию фото");generation[0].setTextColor(INK);generation[0].setTextSize(16);generation[0].setMinHeight(dp(48));generation[0].setChecked(prefs.getBoolean("generation",false));body.addView(generation[0]);muted("Кнопка находится в каждом рецепте. Создание — только с подтверждением, сохранение — после просмотра. Тариф и квоты определяет сервер.");});
         button("Сохранить настройки",()->{String r=region[0].getText().toString().trim();if(r.length()<2||r.length()>100){message("Укажите регион длиной от 2 до 100 символов.");return;}prefs.edit().putString("region",r).putString("currency",currencies[currency[0].getSelectedItemPosition()]).putBoolean("generation",generation[0].isChecked()).apply();message("Настройки сохранены.");});
         section("Сервис");link("Проверить генератор","spark",()->task(()->ApiClient.call("/api/image-options",null),v->message(((JSONObject)v).optString("message"))));
-        link("Проверить соединение","arrow",()->task(()->ApiClient.call("/api/status",null),v->{authenticated=((JSONObject)v).optBoolean("authenticated");if(authenticated)message("Сервер доступен. Вы вошли.");else{ApiClient.clearSession();loginPage("Срок входа истёк. Введите пароль снова.");}}));
+        link("Проверить соединение","arrow",()->task(()->ApiClient.call("/api/status",null),v->message("Сервер доступен. Можно подбирать блюда.")));
         if(prefs.contains("pendingImage")){button(photoButtonLabel().equals("Посмотреть результат")?"Посмотреть результат":"Продолжить получение прежнего фото",()->{try{JSONObject job=pendingPhoto();if(job.optString("phase").equals("ready"))preview(job.getJSONObject("snapshot"),readFile(draftFile(),3*1024*1024));else generate(true);}catch(Exception e){message("Не удалось открыть прежнее фото.");}});link("Убрать незавершённое задание","back",()->confirm("Убрать задание?","Это не отменит его у поставщика. Следующее создание фото будет новым запросом.",()->{prefs.edit().remove("pendingImage").apply();draftFile().delete();settings();}));}
-        link("Выйти","back",()->{if(busy)return;ApiClient.clearSession();authenticated=false;loginPage("Вы вышли. Сохранённые рецепты остались на устройстве.");});
-        section("К столу · 0.9.0");muted("История хранится на этом устройстве и доступна без интернета. Удаление приложения или очистка данных удалят её. Сайт и Windows используют отдельное хранилище.");muted("Для подбора и генерации нужен интернет. Секретные API-ключи находятся только на сервере. Ккал и цены — приблизительные оценки.");
+        section("К столу");muted("История хранится на этом устройстве и доступна без интернета. Удаление приложения или очистка данных удалят её. Сайт и Android хранят историю отдельно.");muted("Для подбора и генерации нужен интернет. Секретные API-ключи находятся только на сервере. Ккал и цены — приблизительные оценки.");
     }
     private void generate(boolean restore){
-        if(busy)return;if(!authenticated){login();return;}if(!prefs.getBoolean("generation",false)){toast("Сначала разрешите генерацию в настройках.");return;}
+        if(busy)return;if(!prefs.getBoolean("generation",false)){toast("Сначала разрешите генерацию в настройках.");return;}
         try{
             JSONObject pending=prefs.contains("pendingImage")?new JSONObject(prefs.getString("pendingImage","{}")):null;
             if(pending!=null&&pending.optString("phase").equals("ready")){preview(pending.getJSONObject("snapshot"),readFile(draftFile(),3*1024*1024));return;}
@@ -306,7 +274,5 @@ public class MainActivity extends Activity {
         category.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onNothingSelected(AdapterView<?> p){}public void onItemSelected(AdapterView<?> p,View v,int pos,long id){catalogCategory=keys.get(pos);render.run();}});sort.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onNothingSelected(AdapterView<?> p){}public void onItemSelected(AdapterView<?> p,View v,int pos,long id){catalogSort=sortKeys[pos];render.run();}});render.run();}
     private void newFolder(){EditText name=new EditText(this);name.setHint("Название папки");name.setSingleLine(true);AlertDialog d=new AlertDialog.Builder(this).setTitle("Новая папка").setView(name).setNegativeButton("Отмена",null).setPositiveButton("Создать",null).create();d.setOnShowListener(x->{fitDialog(d);d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{if(!Library.addFolder(this,name.getText().toString())){name.setError("До 40 символов, без повторов. Максимум 30 папок.");return;}d.dismiss();if(page.equals("history"))showHistory();else if(selected!=null)folderPicker(selected.optJSONObject("recipe"));});});d.show();}
     private void folderPicker(JSONObject recipe){List<String> folders=Library.folders(this);Set<String> selectedFolders=Library.assigned(this,recipe);boolean[] checked=new boolean[folders.size()];for(int i=0;i<checked.length;i++)checked[i]=selectedFolders.contains(folders.get(i));new AlertDialog.Builder(this).setTitle("Сохранить в папки").setMultiChoiceItems(folders.toArray(new String[0]),checked,(d,pos,on)->{if(on)selectedFolders.add(folders.get(pos));else selectedFolders.remove(folders.get(pos));}).setNeutralButton("+ Папка",(d,w)->newFolder()).setNegativeButton("Отмена",null).setPositiveButton("Сохранить",(d,w)->{try{saveSelected();Library.assign(this,recipe,selectedFolders);detail();toast("Папки сохранены.");}catch(Exception e){message("Не удалось сохранить папки.");}}).show();}
-    private void ingredientRow(JSONObject ingredient,double factor,String currency){String unit=ingredient.optString("unit"),u=unit.equals("g")?"г":unit.equals("ml")?"мл":"шт.";infoRow(ingredient.optString("name"),amount(ingredient.optDouble("amount")*factor)+" "+u);JSONObject price=PriceBook.price(this,ingredient,currency);String label="Указать цену";if(price!=null&&price.optDouble("quantity")>0){double ratio=ingredient.optDouble("amount")*factor/price.optDouble("quantity");double lo=price.optDouble("low")*ratio,hi=price.optDouble("high")*ratio;String range=Math.round(lo)==Math.round(hi)?amount(Math.round(lo)):String.format(Locale.getDefault(),"%.0f–%.0f",lo,hi);label="≈ "+range+" "+currency+" · "+(price.optString("source").equals("manual")?"ваша цена":price.optString("source").equals("receipt")?"по чеку":"оценка");}Button b=buttonView(label,()->editPrice(ingredient,currency));b.setTextSize(14);b.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);b.setBackgroundColor(Color.TRANSPARENT);b.setContentDescription(ingredient.optString("name")+": "+label+". Изменить цену");body.addView(b,new LinearLayout.LayoutParams(-1,-2));}
-    private void editPrice(JSONObject ingredient,String currency){LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setPadding(dp(20),dp(8),dp(20),dp(8));TextView hint=text("Укажите стоимость упаковки и её количество в единицах рецепта. Это ваша цена, а не проверенная цена магазина.",14);layout.addView(hint);TextView q=text("Количество в упаковке ("+(ingredient.optString("unit").equals("g")?"г":ingredient.optString("unit").equals("ml")?"мл":"шт.")+")",14);layout.addView(q);EditText quantity=new EditText(this),value=new EditText(this);quantity.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);value.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);for(EditText edit:new EditText[]{quantity,value}){edit.setKeyListener(android.text.method.DigitsKeyListener.getInstance("0123456789.,"));edit.setRawInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);}quantity.setContentDescription("Количество в упаковке");value.setContentDescription("Цена упаковки в "+currency);JSONObject existing=PriceBook.price(this,ingredient,currency);quantity.setText(amount(existing==null?(ingredient.optString("unit").equals("piece")?1:1000):existing.optDouble("quantity",1)));if(existing!=null&&existing.optString("source").equals("manual"))value.setText(amount(existing.optDouble("low")));layout.addView(quantity);layout.addView(text("Цена упаковки · "+currency,14));layout.addView(value);AlertDialog d=new AlertDialog.Builder(this).setTitle(ingredient.optString("name")).setView(layout).setNegativeButton("Отмена",null).setPositiveButton("Сохранить",null).create();if(existing!=null&&existing.optString("source").equals("manual")){Button reset=buttonView("Вернуть цену из рецепта",()->{PriceBook.clear(this,ingredient,currency);d.dismiss();detail();});reset.setTextSize(14);reset.setBackgroundColor(Color.TRANSPARENT);layout.addView(reset);}d.setOnShowListener(x->{fitDialog(d);d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{try{PriceBook.save(this,ingredient,currency,PriceBook.decimal(quantity.getText().toString()),PriceBook.decimal(value.getText().toString()));d.dismiss();detail();}catch(Exception e){value.setError("Проверьте цену и количество. Только положительные конечные числа; цена может быть 0.");}});});d.show();}
-    private void openCooking(){if(busy||selected==null)return;Runnable launch=()->{try{selected.put("portions",portions);startActivity(new Intent(this,CookingActivity.class).putExtra("item",selected.toString()));}catch(Exception e){message("Не удалось открыть готовку.");}};try{String old=getSharedPreferences("cooking",0).getString("item",null);if(old!=null&&!Library.id(new JSONObject(old).getJSONObject("recipe")).equals(Library.id(selected.getJSONObject("recipe")))){confirm("Начать другое блюдо?","Текущие шаги и таймер будут заменены. Сохранённый рецепт останется.",launch);return;}}catch(Exception ignored){}launch.run();}
+    private void ingredientRow(JSONObject ingredient,double factor,String currency){String unit=ingredient.optString("unit"),u=unit.equals("g")?"г":unit.equals("ml")?"мл":"шт.";infoRow(ingredient.optString("name"),amount(ingredient.optDouble("amount")*factor)+" "+u);JSONObject price=ingredient.optJSONObject("price");if(price!=null&&price.optDouble("quantity")>0){double ratio=ingredient.optDouble("amount")*factor/price.optDouble("quantity");muted("≈ "+amount(Math.round(price.optDouble("low")*ratio))+"–"+amount(Math.round(price.optDouble("high")*ratio))+" "+currency+" · "+(price.optString("source").equals("receipt")?"по чеку":"оценка"));}else muted("Оценка цены недоступна");}
 }
