@@ -75,7 +75,7 @@ function renderDishPhoto(id,recipe){
 }
 function renderPhotoCredit(recipe){
  const root=$('photoCredit'),photo=selectedPhoto(recipe);root.replaceChildren();
- if(!photo){root.textContent='Подходящего фото пока нет. Генерацию можно разрешить в настройках.';return}
+ if(!photo){root.textContent='Подходящего фото пока нет. Фото можно создать по кнопке в рецепте после подтверждения.';return}
  if(photo.generated){root.textContent='Изображение ИИ · '+photo.model+'. Примерный вид блюда, а не обещание точного результата. Сохранено на этом устройстве.';return}
  const label=document.createElement('span');label.textContent='Пример подачи · ';
  const author=document.createElement('a');author.href=photo.source;author.textContent=photo.author;author.target='_blank';author.rel='noopener noreferrer';
@@ -105,9 +105,8 @@ document.addEventListener('click',e=>{if(!$('recipeMore').contains(e.target))$('
 let imageBusy=false;const imageMessages=new Map();
 function imageMessage(k,text){imageMessages.set(k,text);refreshImageStatus()}
 function refreshImageStatus(){const text=current?imageMessages.get(DishImages.key(current.recipe)):null;$('imageStatus').hidden=!text;$('imageStatus').textContent=text||''}
-try{$('allowGeneration').checked=localStorage.getItem('k-stolu-generation')==='on'}catch{}
 function updateGenerationButtons(){
- const enabled=$('allowGeneration').checked,photo=current?DishImages.get(current.recipe):null;
+ const photo=current?DishImages.get(current.recipe):null;
  $('generatePhoto').hidden=!current;$('generatePhoto').disabled=imageBusy;
  let pending;try{pending=JSON.parse(localStorage.getItem('k-stolu-pending-image')||'null')}catch{}
  const resume=current&&pending?.key===DishImages.key(current.recipe);
@@ -116,11 +115,9 @@ function updateGenerationButtons(){
  $('generatedCount').textContent='Фото на устройстве: '+DishImages.count()+' из 50.';if($('forgetGeneration'))$('forgetGeneration').hidden=!pending;
 }
 async function checkImageOptions(){
- if(!$('allowGeneration').checked){$('generationInfo').textContent='Выключено. Сохранённые фото остаются доступны.';return}
  $('generationInfo').textContent='Проверяем настройки генератора…';
  try{const info=await api('/api/image-options');$('generationInfo').textContent=info.message+(info.available?' До '+info.dailyLimit+' генераций в день.':'')}catch(e){$('generationInfo').textContent=e.message}
 }
-$('allowGeneration').onchange=()=>{try{localStorage.setItem('k-stolu-generation',$('allowGeneration').checked?'on':'off')}catch{notify('Настройка не сохранится после закрытия.')}updateGenerationButtons();checkImageOptions()};
 $('clearGenerated').onclick=async()=>{if(imageBusy)return notify('Сначала дождитесь завершения генерации.');if(!DishImages.count())return notify('Сохранённых фото ИИ пока нет.');if(!confirm('Удалить все сохранённые фото ИИ? Рецепты останутся.'))return;try{await DishImages.clear();if(current)renderRecipe();renderHistory();updateGenerationButtons();notify('Фото ИИ удалены.')}catch(e){notify(e.message)}};
 $('deleteGenerated').onclick=async()=>{if(!current||imageBusy)return;if(!confirm('Удалить это фото ИИ? Рецепт останется.'))return;try{await DishImages.remove(current.recipe);renderRecipe();renderHistory();notify('Фото удалено.')}catch(e){notify(e.message)}};
 function saveImageSnapshot(snapshot,n){
@@ -143,12 +140,12 @@ function approveGeneratedPhoto(recipe,image){
  });
 }
 $('generatePhoto').onclick=async()=>{
- if(imageBusy||!current)return;if(!$('allowGeneration').checked){$('allowGeneration').checked=true;try{localStorage.setItem('k-stolu-generation','on')}catch{}}
+ if(imageBusy||!current)return;
  const snapshot=structuredClone(current),n=portions,k=DishImages.key(snapshot.recipe);let saved;
  try{saved=JSON.parse(localStorage.getItem('k-stolu-pending-image')||'null')}catch{}
  if(saved&&saved.key!==k&&!confirm('Для другого блюда есть незавершённое задание. Продолжить с этим блюдом? Старое изображение пока можно будет получить по прежнему заданию только до его замены на устройстве.'))return;
  const resume=saved?.key===k?saved:null;
- if(!resume&&!confirm('Создать одно фото блюда? Название, состав и способ приготовления отправятся настроенному поставщику изображений (Cloudflare или AnyModel). Условия и квота указаны в настройках генерации.'))return;
+ if(!resume&&!confirm('Создать одно фото блюда? Название, состав и способ приготовления отправятся настроенному поставщику изображений (Cloudflare или AnyModel). Создание может оплачиваться по тарифу поставщика. Условия и квота указаны в настройках генерации.'))return;
  imageBusy=true;$('recipeMore').open=false;imageMessage(k,resume?'Получаем результат прежнего задания…':'Проверяем тариф и создаём фото…');updateGenerationButtons();
  const pending=resume||{key:k,requestId:crypto.randomUUID()};
  try{
@@ -175,7 +172,7 @@ $('generatePhoto').onclick=async()=>{
 };
 // Recovering a failed job is explicit; it never starts another generation by itself.
 const forget=document.createElement('button');forget.id='forgetGeneration';forget.textContent='Убрать незавершённое задание';forget.className='wide';forget.onclick=()=>{if(imageBusy)return notify('Задание ещё выполняется.');if(confirm('Убрать ссылку на задание? Оно может завершиться у поставщика. Следующее создание фото будет новым запросом.')){localStorage.removeItem('k-stolu-pending-image');updateGenerationButtons();notify('Незавершённое задание убрано.')}};$('clearGenerated').after(forget);
-DishImages.ready.then(()=>{updateGenerationButtons();if(current)renderRecipe();renderHistory()}).catch(e=>{$('generationInfo').textContent=e.message;$('allowGeneration').checked=false;$('allowGeneration').disabled=true;updateGenerationButtons()});
+DishImages.ready.then(()=>{updateGenerationButtons();if(current)renderRecipe();renderHistory()}).catch(e=>{$('generationInfo').textContent=e.message;updateGenerationButtons()});
 document.querySelector('[data-page="settings"]').addEventListener('click',()=>{updateGenerationButtons();checkImageOptions()});
 
 $('recipeMore').addEventListener('toggle',()=>{const menu=$('recipeMore');if(!menu.open)return;const panel=menu.querySelector('.menu-panel'),anchor=menu.querySelector('summary').getBoundingClientRect(),main=$('main').getBoundingClientRect();const above=anchor.top-main.top,below=main.bottom-anchor.bottom;const up=below<panel.scrollHeight+12&&above>below;menu.classList.toggle('opens-up',up);panel.style.maxHeight=Math.max(100,(up?above:below)-16)+'px'});

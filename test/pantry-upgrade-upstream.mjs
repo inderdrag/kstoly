@@ -1,0 +1,5 @@
+if(process.env.NODE_ENV!=='test')throw Error('Test only');
+import {appendFileSync} from 'node:fs';let calls=0;
+globalThis.fetch=async(url,init)=>{if(String(url)!=='https://anymodel.org/v1/chat/completions')throw Error('Unexpected network');const p=JSON.parse(init.body);appendFileSync(process.env.QA_CAPTURE,JSON.stringify(p)+'\n');calls++;
+const r=i=>({status:'ok',title:'Проверенный вариант '+i,description:'Блюдо из списка',meal_type:'main',servings:2,prep_minutes:5,cook_minutes:10,equipment:['hob'],difficulty:{level:'easy',reasons:['Одна сковорода']},nutrition:{source:'estimate',total_kcal:280,cooked_weight_g:200},ingredients:[{name:'Томаты',amount:200,unit:'g',availability:'present',product_index:0,price:null},{name:'Соль',amount:1,unit:'g',availability:'missing',price:null}],steps:[{title:'Прогрейте',body:'Прогрейте томаты на среднем огне с солью.',ingredient_indexes:[0,1],timer_seconds:180}],warnings:[]});
+const content={status:'ok',recipes:Array.from({length:calls===1?1:8},(_,i)=>r(i))};return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(content)}}]});};

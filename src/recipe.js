@@ -1,5 +1,6 @@
 import {parseModelJson} from './model-json.js';
 import {generatedRecipePrices} from './model-prices.js';
+import {hasAlcohol} from './food-rules.js';
 import {nutritionEstimate} from './estimates.js';
 export class RecipeError extends Error {}
 export const MAX_RECIPES=10;
@@ -44,8 +45,10 @@ export function validateRecipe(data,{receipt=false,currency='RUB'}={}) {
     return {name:i.name,amount:i.amount,unit:i.unit,price,...(["present","missing","basic"].includes(i.availability)?{availability:i.availability}:{}),...(Number.isInteger(i.product_index)?{product_index:i.product_index}:{})};
   });
   const steps=data.steps.map((step,index)=>{if(!obj(step)||!text(step.title,100)||!text(step.body,2600))fail('steps['+index+']');const timer=Number.isInteger(step.timer_seconds)&&number(step.timer_seconds,1,21600)?{timer_seconds:step.timer_seconds,...(text(step.timer_hint,240)?{timer_hint:step.timer_hint}:{})}:{};const indexes=Array.isArray(step.ingredient_indexes)&&step.ingredient_indexes.length<=30&&step.ingredient_indexes.every(n=>Number.isInteger(n)&&n>=0&&n<ingredients.length)?{ingredient_indexes:[...new Set(step.ingredient_indexes)]}:{};return {title:step.title,body:step.body,...timer,...indexes};});
-  const warnings=data.warnings===undefined?[]:data.warnings;
+  const warnings=data.warnings===undefined?[]:[...(Array.isArray(data.warnings)?data.warnings:[])];
+  if(data.warnings!==undefined&&!Array.isArray(data.warnings))fail('warnings');
   if(!Array.isArray(warnings)||warnings.length>12||warnings.some(x=>!text(x,400)))fail('warnings');
+  if(ingredients.some(i=>hasAlcohol(i.name))&&!warnings.some(w=>/алкогол/iu.test(w))&&warnings.length<12)warnings.push('Содержит алкоголь: нагрев не гарантирует полного удаления. Не для детей и людей, которым нельзя алкоголь.');
   if(data.image_prompt!==undefined&&(!text(data.image_prompt,1000)||data.image_prompt.trim().length<40||!/[A-Za-z]/.test(data.image_prompt)||/[А-Яа-яЁё<>]/.test(data.image_prompt)))fail('image_prompt');
   if(data.meal_type!==undefined&&!mealTypes.has(data.meal_type))fail('meal_type');
   // Nutrition is optional for old recipes. Discard invalid estimates instead of retrying a paid model call.
@@ -102,6 +105,8 @@ export function parseRecipeSelection(raw,options){
   if(preferences.includes('no_salads')&&recipes.some(isSalad))throw new RecipeError('Выбрано Без салатов. Замените салаты другими блюдами.');
   if(preferences.includes('quick')&&recipes.some(r=>r.prep_minutes+r.cook_minutes>20))throw new RecipeError('Выбрано До 20 минут, с учётом подготовки.');
   if(preferences.includes('no_oven')&&recipes.some(r=>r.equipment?.includes('oven')||/духовк|разогрейте печь|выпекайте|запекайте/iu.test(r.steps.map(s=>s.body).join(' '))))throw new RecipeError('Выбрано Без духовки. Предложите приготовление на плите или без нагрева.');
+  if(preferences.includes('low_cal')&&recipes.some(r=>!Number.isFinite(r.nutrition?.kcal_per_100g)||r.nutrition.kcal_per_100g>150))throw new RecipeError('Выбрано Мало калорий: не более 150 ккал на 100 г готового блюда.');
+  if(options?.targetRecipes===8&&recipes.length<8&&!text(value.fewer_recipes_reason,400))throw new RecipeError('Нужно 8–10 действительно разных блюд. Если это невозможно по подтверждённым продуктам и ограничениям, добавь конкретное fewer_recipes_reason; не придумывай продукты.');
   recipes.sort((a,b)=>Number(isSalad(a))-Number(isSalad(b)));
-  return {status:'ok',recipes};
+  return {status:'ok',recipes,...(text(value.fewer_recipes_reason,400)&&recipes.length<8?{fewer_recipes_reason:value.fewer_recipes_reason}:{})};
 }
