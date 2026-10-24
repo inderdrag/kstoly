@@ -10,8 +10,8 @@ final class InlineCooking extends LinearLayout {
  private TextView text(String s,int size,boolean bold){TextView t=new TextView(host);t.setText(s);t.setTextColor(INK);t.setTextSize(size);t.setLineSpacing(dp(4),1);if(bold)t.setTypeface(null,Typeface.BOLD);LayoutParams p=new LayoutParams(-1,-2);p.setMargins(0,dp(6),0,dp(10));addView(t,p);return t;}
  private Button button(String s,Runnable action,boolean primary){Button b=new Button(host);b.setText(s);b.setTextSize(15);b.setAllCaps(false);b.setTextColor(primary?Color.WHITE:OLIVE);b.setTypeface(null,Typeface.BOLD);b.setBackground(bg(primary?OLIVE:SOFT));b.setPadding(dp(8),dp(10),dp(8),dp(10));b.setMinHeight(dp(48));b.setOnClickListener(v->action.run());return b;}
  private void persist(){try{state.remaining=state.left(SystemClock.elapsedRealtime());store.edit().putString(key,state.json().toString()).putString("item",item.toString()).apply();}catch(Exception ignored){}}
- void resumeTimer(){if(active)return;active=true;if(state.expire(SystemClock.elapsedRealtime())){persist();signalTimer();render();}handler.post(tick);}
- void suspendTimer(){active=false;handler.removeCallbacks(tick);persist();}
+ void resumeTimer(){if(active)return;active=true;setKeepScreenOn(state.index<steps.length());if(state.expire(SystemClock.elapsedRealtime())){persist();signalTimer();render();}handler.post(tick);}
+ void suspendTimer(){setKeepScreenOn(false);active=false;handler.removeCallbacks(tick);persist();}
  @Override protected void onAttachedToWindow(){super.onAttachedToWindow();resumeTimer();}
  @Override protected void onDetachedFromWindow(){suspendTimer();super.onDetachedFromWindow();}
  private final Runnable tick=new Runnable(){public void run(){if(!active)return;if(state.expire(SystemClock.elapsedRealtime())){persist();signalTimer();render();announceForAccessibility("Таймер завершён. Проверьте готовность. Следующий шаг.");}updateClock();handler.postDelayed(this,500);}};
@@ -19,7 +19,7 @@ final class InlineCooking extends LinearLayout {
  private void signalTimer(){if(TimerAlarm.foreground(host,key)){soundSignals++;TimerSound.play();}}
  int currentStep(){return state.index;}
  long timerSeconds(){return (state.left(SystemClock.elapsedRealtime())+999)/1000;}
- private void render(){removeAllViews();clock=null;play=null;
+ private void render(){setKeepScreenOn(active&&state.index<steps.length());removeAllViews();clock=null;play=null;
   if(state.index>=steps.length()){text("Вы приготовили блюдо!",23,true);text("Как получилось? Оценка останется в сохранённом.",15,false).setTextColor(MUTED);RatingBar stars=new RatingBar(host);stars.setNumStars(5);stars.setStepSize(1);stars.setRating(Library.rating(host,recipe));addView(stars,new LayoutParams(-2,-2));Button save=button("Сохранить оценку",()->{int n=Math.round(stars.getRating());if(n<1){Toast.makeText(host,"Выберите от 1 до 5 звёзд",Toast.LENGTH_SHORT).show();return;}try{Library.save(host,item);Library.rate(host,recipe,n);Toast.makeText(host,"Приятного аппетита! Оценка сохранена.",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(host,"Не удалось сохранить оценку.",Toast.LENGTH_SHORT).show();}},true);addView(save,new LayoutParams(-1,-2));Button again=button("Вернуться к шагам",()->move(-1),false);LayoutParams ap=new LayoutParams(-1,-2);ap.topMargin=dp(8);addView(again,ap);return;}
   TextView label=text("ШАГ "+(state.index+1)+" / "+steps.length(),12,true);label.setTextColor(OLIVE);label.setLetterSpacing(.1f);ProgressBar progress=new ProgressBar(host,null,android.R.attr.progressBarStyleHorizontal);progress.setMax(steps.length());progress.setProgress(state.index+1);progress.setProgressTintList(android.content.res.ColorStateList.valueOf(OLIVE));addView(progress,new LayoutParams(-1,dp(4)));
   JSONObject step=steps.optJSONObject(state.index);text(step.optString("title"),23,true);

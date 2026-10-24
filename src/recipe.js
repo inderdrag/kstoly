@@ -39,7 +39,7 @@ export function validateRecipe(data,{receipt=false,currency='RUB'}={}) {
       if(p.source==='receipt'&&(!receipt||p.low!==p.high))fail(priceKey+'.receipt');
       price={source:p.source,quantity:p.quantity,unit:p.unit,currency:p.currency,low:p.low,high:p.high,note:p.note};
     }
-    return {name:i.name,amount:i.amount,unit:i.unit,price};
+    return {name:i.name,amount:i.amount,unit:i.unit,price,...(["present","missing","basic"].includes(i.availability)?{availability:i.availability}:{}),...(Number.isInteger(i.product_index)?{product_index:i.product_index}:{})};
   });
   const steps=data.steps.map((step,index)=>{if(!obj(step)||!text(step.title,100)||!text(step.body,2600))fail('steps['+index+']');const timer=Number.isInteger(step.timer_seconds)&&number(step.timer_seconds,1,21600)?{timer_seconds:step.timer_seconds,...(text(step.timer_hint,240)?{timer_hint:step.timer_hint}:{})}:{};const indexes=Array.isArray(step.ingredient_indexes)&&step.ingredient_indexes.length<=30&&step.ingredient_indexes.every(n=>Number.isInteger(n)&&n>=0&&n<ingredients.length)?{ingredient_indexes:[...new Set(step.ingredient_indexes)]}:{};return {title:step.title,body:step.body,...timer,...indexes};});
   const warnings=data.warnings===undefined?[]:data.warnings;
@@ -49,7 +49,8 @@ export function validateRecipe(data,{receipt=false,currency='RUB'}={}) {
   // Nutrition is optional for old recipes. Discard invalid estimates instead of retrying a paid model call.
   const n=data.nutrition;
   const nutrition=nutritionEstimate(n,data.servings);
-  return {status:'ok',...(data.meal_type?{meal_type:data.meal_type}:{}),...(nutrition?{nutrition}:{}),...(Array.isArray(data.equipment)&&data.equipment.length<=6&&data.equipment.every(x=>['hob','oven','microwave','kettle','none'].includes(x))?{equipment:[...new Set(data.equipment)]}:{}),...(data.image_prompt?{image_prompt:data.image_prompt.trim()}:{}),title:data.title,description:data.description,servings:data.servings,prep_minutes:data.prep_minutes,cook_minutes:data.cook_minutes,ingredients,steps,warnings};
+  const difficulty=data.difficulty&&['easy','attention'].includes(data.difficulty.level)&&Array.isArray(data.difficulty.reasons)&&data.difficulty.reasons.length>=1&&data.difficulty.reasons.length<=3&&data.difficulty.reasons.every(x=>text(x,160))?{difficulty:{level:data.difficulty.level,reasons:data.difficulty.reasons}}:{};
+  return {status:'ok',...difficulty,...(data.meal_type?{meal_type:data.meal_type}:{}),...(nutrition?{nutrition}:{}),...(Array.isArray(data.equipment)&&data.equipment.length<=7&&data.equipment.every(x=>['hob','oven','microwave','multicooker','air_fryer','kettle','none'].includes(x))?{equipment:[...new Set(data.equipment)]}:{}),...(data.image_prompt?{image_prompt:data.image_prompt.trim()}:{}),title:data.title,description:data.description,servings:data.servings,prep_minutes:data.prep_minutes,cook_minutes:data.cook_minutes,ingredients,steps,warnings};
 }
 export function parseRecipe(raw,options){
   if(typeof raw!=='string'||raw.length>60000)throw new RecipeError('Пустой или слишком большой ответ модели.');
