@@ -17,6 +17,6 @@ test('HTTP four maximum-size photos, receipt, interrupted response, validation a
   assert.equal((await send(single)).status,200); // inFlight released after each failure
   assert.equal((logs.match(/TEST_UPSTREAM_CALL/g)||[]).length,5); // no automatic paid retries
   const traces=logs.split('\n').filter(x=>x.startsWith('{')).map(JSON.parse);assert.ok(traces.some(x=>x.event==='analyze_error'&&x.status===504));assert.equal(JSON.stringify(traces).includes('base64'),false);assert.equal(JSON.stringify(traces).includes('fake-key'),false);
-  assert.equal((await(await fetch(origin+'/api/status')).json()).build,'1.2.1');
+  assert.equal((await(await fetch(origin+'/api/status')).json()).build,'1.2.3');
  }finally{const exited=new Promise(r=>child.once('exit',r));child.kill();await exited;await rm(dir,{recursive:true,force:true});}
 });
