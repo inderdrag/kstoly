@@ -84,7 +84,7 @@ const server=http.createServer(async(req,res)=>{
    if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Запрос разрешён только с адреса приложения.'});
  }
  if(req.method==='POST'&&['/api/analyze','/api/selection-jobs','/api/images','/api/chat'].includes(pathname)){const rate=publicLimit(req.socket.remoteAddress);if(!rate.ok)return json(res,429,{error:'Слишком много запросов. Подождите '+rate.retryAfter+' сек. Повтор автоматически не отправлен.'},{'Retry-After':String(rate.retryAfter)});}
- if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:true,configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'1.1.1',chatConfigured:Boolean(API_KEY),chatModel});
+ if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{authenticated:true,configured:Boolean(API_KEY),model:MODEL,dailyLimit:DAILY,build:'1.1.2',chatConfigured:Boolean(API_KEY),chatModel});
  if(pathname==='/api/selection-jobs'&&req.method==='POST'){const job=selectionJobs.start(await body(req,15*1024*1024));return json(res,job.status==='pending'?202:200,job);}
  if(pathname.startsWith('/api/selection-jobs/')&&req.method==='GET')return json(res,200,selectionJobs.lookup(pathname.slice('/api/selection-jobs/'.length)));
  if(pathname.startsWith('/api/chat-status/')&&req.method==='GET')return json(res,200,sousChef.lookup(pathname.slice('/api/chat-status/'.length)));
