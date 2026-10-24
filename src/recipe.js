@@ -1,3 +1,4 @@
+import {parseModelJson} from './model-json.js';
 import {nutritionEstimate} from './estimates.js';
 export class RecipeError extends Error {}
 export const MAX_RECIPES=10;
@@ -54,9 +55,7 @@ export function validateRecipe(data,{receipt=false,currency='RUB'}={}) {
 }
 export function parseRecipe(raw,options){
   if(typeof raw!=='string'||raw.length>60000)throw new RecipeError('Пустой или слишком большой ответ модели.');
-  let source=raw.trim();
-  if(source.startsWith('```'))source=source.replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'');
-  let value;try{value=JSON.parse(source);}catch{throw new RecipeError('Модель вернула невалидный JSON.');}
+  let value;try{value=parseModelJson(raw,60000);}catch{throw new RecipeError('Модель вернула невалидный JSON.');}
   return validateRecipe(value,options);
 }
 export function calculateCost(recipe,servings=recipe.servings){
@@ -90,8 +89,7 @@ export function jpegInfo(dataUrl){
 
 export function parseRecipeSelection(raw,options){
   if(typeof raw!=='string'||raw.length>240000)throw new RecipeError('Пустой или слишком большой ответ модели.');
-  let source=raw.trim();if(source.startsWith('```'))source=source.replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'');
-  let value;try{value=JSON.parse(source)}catch{throw new RecipeError('Модель вернула невалидный JSON.')}
+  let value;try{value=parseModelJson(raw)}catch{throw new RecipeError('Модель вернула невалидный JSON.')}
   if(value?.status!=='ok')return validateRecipe(value,options);
   if(!Array.isArray(value.recipes)||value.recipes.length<1||value.recipes.length>MAX_RECIPES)throw new RecipeError('Ожидаются от 1 до 10 рецептов на выбор.');
   const recipes=value.recipes.map((r,index)=>{try{const recipe=validateRecipe(obj(r)&&r.status===undefined?{...r,status:'ok'}:r,options);if(recipe.status!=='ok')throw new RecipeError('В списке должен быть полный рецепт.');return recipe}catch(e){if(e instanceof RecipeError)throw new RecipeError('recipes['+index+']: '+e.message);throw e}});
