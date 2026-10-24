@@ -1,4 +1,5 @@
 import {parseModelJson} from './model-json.js';
+import {generatedRecipePrices} from './model-prices.js';
 import {nutritionEstimate} from './estimates.js';
 export class RecipeError extends Error {}
 export const MAX_RECIPES=10;
@@ -92,7 +93,7 @@ export function parseRecipeSelection(raw,options){
   let value;try{value=parseModelJson(raw)}catch{throw new RecipeError('Модель вернула невалидный JSON.')}
   if(value?.status!=='ok')return validateRecipe(value,options);
   if(!Array.isArray(value.recipes)||value.recipes.length<1||value.recipes.length>MAX_RECIPES)throw new RecipeError('Ожидаются от 1 до 10 рецептов на выбор.');
-  const recipes=value.recipes.map((r,index)=>{try{const recipe=validateRecipe(obj(r)&&r.status===undefined?{...r,status:'ok'}:r,options);if(recipe.status!=='ok')throw new RecipeError('В списке должен быть полный рецепт.');return recipe}catch(e){if(e instanceof RecipeError)throw new RecipeError('recipes['+index+']: '+e.message);throw e}});
+  const recipes=value.recipes.map((r,index)=>{try{const candidate=options?.generatedPrices?generatedRecipePrices(r,options):r;const recipe=validateRecipe(obj(candidate)&&candidate.status===undefined?{...candidate,status:'ok'}:candidate,options);if(recipe.status!=='ok')throw new RecipeError('В списке должен быть полный рецепт.');return recipe}catch(e){if(e instanceof RecipeError)throw new RecipeError('recipes['+index+']: '+e.message);throw e}});
   if(new Set(recipes.map(r=>r.title.trim().toLocaleLowerCase('ru'))).size!==recipes.length)throw new RecipeError('Названия вариантов должны различаться.');
   // Old saved single recipes stay compatible; selection balance is checked only for 3+ options.
   const saladLimit=recipes.length>=6?2:1;
