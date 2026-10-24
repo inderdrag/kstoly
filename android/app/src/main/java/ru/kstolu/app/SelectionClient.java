@@ -4,7 +4,14 @@ import android.content.Context;import android.content.SharedPreferences;import o
 final class SelectionClient {
  static final String PENDING="pendingSelection",READY="readySelection";
  static JSONObject run(Context context,JSONObject request,ApiClient.Progress progress)throws Exception{
-  SharedPreferences prefs=context.getSharedPreferences("settings",0);String ready=prefs.getString(READY,null);if(ready!=null)return new JSONObject(ready);
+  SharedPreferences prefs=context.getSharedPreferences("settings",0);String ready=prefs.getString(READY,null);
+  // A consumed recognition result must not swallow an explicit recipe-plan click.
+  // The reviewed list has already been committed by the screen; no photos replay.
+  if(ready!=null&&request!=null&&request.optString("mode").equals("plan")&&new JSONObject(ready).optString("kind").equals("inventory")){
+   if(!prefs.contains("reviewedInventory"))throw new IOException("Сначала сохраните подтверждённый список продуктов.");
+   if(!prefs.edit().remove(READY).commit())throw new IOException("Не удалось обновить состояние подбора. Запрос не отправлен.");ready=null;
+  }
+  if(ready!=null)return new JSONObject(ready);
   String id=prefs.getString(PENDING,null);JSONObject job=null;
   if(id==null){if(request==null)throw new IOException("Нет незавершённого подбора.");id=UUID.randomUUID().toString();request.put("requestId",id);
    if(!prefs.edit().putString(PENDING,id).commit())throw new IOException("Не удалось сохранить код подбора. Фотографии не отправлены.");
